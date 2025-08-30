@@ -32,7 +32,7 @@ export default function Footer() {
 
       {/* Bottom Bar */}
       <div className="border-t border-gray-700 mt-6 pt-4 text-center text-sm text-gray-400">
-        © {new Date().getFullYear()} Ascend by DMCI Homes. All rights reserved.
+        © {new Date().getFullYear()} Team Ascend. All rights reserved.
       </div>
     </footer>
   );

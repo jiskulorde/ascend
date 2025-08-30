@@ -26,8 +26,9 @@ const makeUnitId = (p: PropertyRow) =>
 
 export default function ComputationPage() {
   const router = useRouter();
-  const params = useParams<{ unitID: string }>();
-  const unitIdFromUrl = decodeURIComponent(params.unitID || "");
+  const params = useParams();
+  // route param name is [unitID] — use the key you actually used in the filename
+  const unitIdFromUrl = decodeURIComponent((params?.unitID as string) || "");
 
   const [rows, setRows] = useState<PropertyRow[]>([]);
   const [selectedUnitId, setSelectedUnitId] = useState<string>(unitIdFromUrl);
@@ -41,7 +42,7 @@ export default function ComputationPage() {
   const [rate15yr, setRate15yr] = useState<number>(6);
   const [rate20yr, setRate20yr] = useState<number>(6);
 
-  const sheetRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -120,9 +121,7 @@ export default function ComputationPage() {
   const amort = (principal: number, annual: number, years: number) => {
     const r = annual / 100 / 12;
     const n = years * 12;
-    return r === 0
-      ? principal / n
-      : principal * (r / (1 - Math.pow(1 + r, -n)));
+    return r === 0 ? principal / n : principal * (r / (1 - Math.pow(1 + r, -n)));
   };
   const monthly15 = amort(bankBalance, rate15yr, 15);
   const monthly20 = amort(bankBalance, rate20yr, 20);
@@ -137,30 +136,35 @@ export default function ComputationPage() {
     })} (subject to unit availability)`;
   })();
 
-  const getSafeFileStem = (stem: string) =>
-    (stem || "computation").replace(/[^\w\-]+/g, "_");
+  const getSafeFileStem = (stem: string) => (stem || "computation").replace(/[^\w\-]+/g, "_");
 
+  // ---------- Downloads using html-to-image ----------
   const downloadPNG = async () => {
     if (!sheetRef.current) return;
-    const html2canvas = (await import("html2canvas")).default;
-    const canvas = await html2canvas(sheetRef.current, { scale: 2 });
-    const link = document.createElement("a");
-    link.download = `${getSafeFileStem(selectedUnitId)}.png`;
-    link.href = canvas.toDataURL("image/png");
-    link.click();
+    // dynamic import so server-side doesn't try to resolve it
+    const { toPng } = await import("html-to-image");
+    // cacheBust helps with external images/CSS in some environments
+    const dataUrl = await toPng(sheetRef.current, { cacheBust: true, pixelRatio: 2 });
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `${getSafeFileStem(selectedUnitId)}.png`;
+    a.click();
   };
 
   const downloadPDF = async () => {
     if (!sheetRef.current) return;
-    const html2canvas = (await import("html2canvas")).default;
+    const { toPng } = await import("html-to-image");
+    const imgData = await toPng(sheetRef.current, { cacheBust: true, pixelRatio: 2 });
     const { jsPDF } = await import("jspdf");
-    const canvas = await html2canvas(sheetRef.current, { scale: 2 });
-    const imgData = canvas.toDataURL("image/png");
-    const pdf = new jsPDF("p", "mm", "a4");
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const imgProps = (pdf as any).getImageProperties(imgData);
-    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-    pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+    const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    // create an image object to compute height scaling safely
+    const img = new Image();
+    img.src = imgData;
+    await new Promise((res) => (img.onload = res));
+    const scale = pageWidth / img.width;
+    const imgHeight = img.height * scale;
+    pdf.addImage(imgData, "PNG", 0, 0, pageWidth, imgHeight);
     pdf.save(`${getSafeFileStem(selectedUnitId)}.pdf`);
   };
 
@@ -196,46 +200,12 @@ export default function ComputationPage() {
     XLSX.writeFile(wb, `${getSafeFileStem(selectedUnitId)}.xlsx`);
   };
 
-  const adjustmentInputs: {
-    key: string;
-    label: string;
-    value: number;
-    onChange: (n: number) => void;
-    step?: number;
-  }[] = [
-    {
-      key: "discount",
-      label: "Special Discount %",
-      value: discountPct,
-      onChange: setDiscountPct,
-      step: 0.1,
-    },
-    {
-      key: "down",
-      label: "Downpayment %",
-      value: downPct,
-      onChange: setDownPct,
-      step: 0.1,
-    },
-    {
-      key: "months",
-      label: "Months to Pay",
-      value: monthsToPay,
-      onChange: (n) => setMonthsToPay(Math.max(1, Math.floor(n))),
-    },
-    {
-      key: "resfee",
-      label: "Reservation Fee",
-      value: reservationFee,
-      onChange: (n) => setReservationFee(Math.max(0, Math.floor(n))),
-    },
-    {
-      key: "closing",
-      label: "Closing Fee %",
-      value: closingFeePct,
-      onChange: setClosingFeePct,
-      step: 0.1,
-    },
+  const adjustmentInputs: { key: string; label: string; value: number; onChange: (n: number) => void; step?: number }[] = [
+    { key: "discount", label: "Special Discount %", value: discountPct, onChange: setDiscountPct, step: 0.1 },
+    { key: "down", label: "Downpayment %", value: downPct, onChange: setDownPct, step: 0.1 },
+    { key: "months", label: "Months to Pay", value: monthsToPay, onChange: (n) => setMonthsToPay(Math.max(1, Math.floor(n))) },
+    { key: "resfee", label: "Reservation Fee", value: reservationFee, onChange: (n) => setReservationFee(Math.max(0, Math.floor(n))) },
+    { key: "closing", label: "Closing Fee %", value: closingFeePct, onChange: setClosingFeePct, step: 0.1 },
   ];
 
   return (
@@ -258,9 +228,7 @@ export default function ComputationPage() {
             </label>
           ))}
         </div>
-        <h3 className="font-semibold mt-6 mb-3 text-blue-900 text-sm">
-          Bank Rates
-        </h3>
+        <h3 className="font-semibold mt-6 mb-3 text-blue-900 text-sm">Bank Rates</h3>
         <div className="space-y-3 text-sm">
           <label className="block text-xs">
             15 years %
@@ -291,9 +259,7 @@ export default function ComputationPage() {
       <section className="flex-1 flex flex-col items-center p-4 overflow-auto">
         {/* Always show search */}
         <div className="bg-white rounded-xl p-4 shadow-sm border max-w-lg w-full mb-4">
-          <p className="font-semibold mb-2 text-blue-900">
-            Select a unit to compute
-          </p>
+          <p className="font-semibold mb-2 text-blue-900">Select a unit to compute</p>
           <Select
             options={unitOptions}
             value={selectedOption}
@@ -310,10 +276,7 @@ export default function ComputationPage() {
 
         {selectedUnit && (
           <div className="w-full max-w-3xl flex flex-col items-center space-y-4">
-            <div
-              ref={sheetRef}
-              className="bg-white rounded-xl shadow-md w-full border overflow-hidden"
-            >
+            <div ref={sheetRef} className="bg-white rounded-xl shadow-md w-full border overflow-hidden">
               {/* Header */}
               <div className="bg-blue-900 text-white p-6 rounded-t-xl">
                 <h1 className="text-2xl font-bold">{selectedUnit.Property}</h1>
@@ -323,24 +286,9 @@ export default function ComputationPage() {
 
               {/* Info Table */}
               <div className="p-4 border-b text-sm grid sm:grid-cols-3 gap-2">
-                <div>
-                  Turnover date:{" "}
-                  <span className="font-semibold text-blue-900">
-                    {selectedUnit.RFODate}
-                  </span>
-                </div>
-                <div>
-                  Building | Unit type:{" "}
-                  <span className="font-semibold text-blue-900">
-                    {selectedUnit.BuildingUnit} | {selectedUnit.Type}
-                  </span>
-                </div>
-                <div>
-                  Total area:{" "}
-                  <span className="font-semibold text-blue-900">
-                    {selectedUnit.GrossAreaSQM}
-                  </span>
-                </div>
+                <div>Turnover date: <span className="font-semibold text-blue-900">{selectedUnit.RFODate}</span></div>
+                <div>Building | Unit type: <span className="font-semibold text-blue-900">{selectedUnit.BuildingUnit} | {selectedUnit.Type}</span></div>
+                <div>Total area: <span className="font-semibold text-blue-900">{selectedUnit.GrossAreaSQM}</span></div>
               </div>
 
               {/* Computation Table */}
@@ -349,15 +297,11 @@ export default function ComputationPage() {
                   <tbody>
                     <tr className="bg-gray-50">
                       <td className="p-2">List Price:</td>
-                      <td className="p-2 text-right font-semibold text-blue-900">
-                        {fmtPhp(selectedUnit.ListPrice)}
-                      </td>
+                      <td className="p-2 text-right font-semibold text-blue-900">{fmtPhp(selectedUnit.ListPrice)}</td>
                     </tr>
                     <tr>
                       <td className="p-2">Special Discount:</td>
-                      <td className="p-2 text-right text-red-600 font-semibold">
-                        {discountPct}%
-                      </td>
+                      <td className="p-2 text-right text-red-600 font-semibold">{discountPct}%</td>
                     </tr>
                     <tr className="bg-gray-50 font-bold text-blue-900">
                       <td className="p-2">Total Contract Price:</td>
@@ -365,55 +309,39 @@ export default function ComputationPage() {
                     </tr>
                     <tr>
                       <td className="p-2">Reservation Fee:</td>
-                      <td className="p-2 text-right">
-                        {fmtPhp(reservationFee)}
-                      </td>
+                      <td className="p-2 text-right">{fmtPhp(reservationFee)}</td>
                     </tr>
                     <tr className="bg-gray-50">
-                      <td className="p-2">
-                        Net Downpayment ({downPct}%):
-                      </td>
+                      <td className="p-2">Net Downpayment ({downPct}%):</td>
                       <td className="p-2 text-right">{fmtPhp(dpAmount)}</td>
                     </tr>
                     <tr className="bg-yellow-100 font-bold text-yellow-900">
                       <td className="p-2">Net Downpayment Payable in:</td>
-                      <td className="p-2 text-right">
-                        {monthsToPay} Mos. ({fmtPhp(dpMonthly)})
-                      </td>
+                      <td className="p-2 text-right">{monthsToPay} Mos. ({fmtPhp(dpMonthly)})</td>
                     </tr>
                     <tr>
-                      <td className="p-2">
-                        Closing Fee ({closingFeePct}%):
-                      </td>
+                      <td className="p-2">Closing Fee ({closingFeePct}%):</td>
                       <td className="p-2 text-right">{fmtPhp(closingFee)}</td>
                     </tr>
                     <tr className="bg-gray-50 font-semibold">
                       <td className="p-2">Balance Bank Financing:</td>
-                      <td className="p-2 text-right text-blue-900">
-                        {fmtPhp(bankBalance)}
-                      </td>
+                      <td className="p-2 text-right text-blue-900">{fmtPhp(bankBalance)}</td>
                     </tr>
                   </tbody>
                 </table>
 
                 {/* Bank Financing */}
                 <div className="mt-4 border-t pt-2">
-                  <p className="font-semibold text-blue-900">
-                    Bank Financing (indicative)
-                  </p>
+                  <p className="font-semibold text-blue-900">Bank Financing (indicative)</p>
                   <table className="w-full text-sm border-collapse">
                     <tbody>
                       <tr>
                         <td className="p-2">20 yrs @ {rate20yr}%</td>
-                        <td className="p-2 text-right font-semibold text-blue-900">
-                          {fmtPhp(monthly20)}
-                        </td>
+                        <td className="p-2 text-right font-semibold text-blue-900">{fmtPhp(monthly20)}</td>
                       </tr>
                       <tr className="bg-gray-50">
                         <td className="p-2">15 yrs @ {rate15yr}%</td>
-                        <td className="p-2 text-right font-semibold text-blue-900">
-                          {fmtPhp(monthly15)}
-                        </td>
+                        <td className="p-2 text-right font-semibold text-blue-900">{fmtPhp(monthly15)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -423,24 +351,9 @@ export default function ComputationPage() {
 
             {/* Download Buttons */}
             <div className="flex gap-3 mt-2">
-              <button
-                onClick={downloadPNG}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg"
-              >
-                Download PNG
-              </button>
-              <button
-                onClick={downloadPDF}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg"
-              >
-                Download PDF
-              </button>
-              <button
-                onClick={downloadExcel}
-                className="px-4 py-2 bg-yellow-500 text-white rounded-lg"
-              >
-                Download Excel
-              </button>
+              <button onClick={downloadPNG} className="px-4 py-2 bg-blue-600 text-white rounded-lg">Download PNG</button>
+              <button onClick={downloadPDF} className="px-4 py-2 bg-green-600 text-white rounded-lg">Download PDF</button>
+              <button onClick={downloadExcel} className="px-4 py-2 bg-yellow-500 text-white rounded-lg">Download Excel</button>
             </div>
           </div>
         )}

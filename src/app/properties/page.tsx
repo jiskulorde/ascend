@@ -29,6 +29,9 @@ export default function PropertiesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ Last updated info from Process Log
+  const [lastUpdated, setLastUpdated] = useState<{ date: string; time: string; fileName: string } | null>(null);
+
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<Option[]>([]);
@@ -108,6 +111,11 @@ export default function PropertiesPage() {
         setMaxPrice(max);
         setPriceRange([0, max]);
 
+        // ✅ Store last updated info if available
+        if (json.latestLog) {
+          setLastUpdated(json.latestLog);
+        }
+
         // Restore selected units
         const stored = localStorage.getItem("selectedUnits");
         if (stored) setSelectedUnits(new Set(JSON.parse(stored)));
@@ -125,7 +133,7 @@ export default function PropertiesPage() {
     localStorage.setItem("selectedUnits", JSON.stringify(Array.from(selectedUnits)));
   }, [selectedUnits]);
 
-    const [sortOption, setSortOption] = useState<string>(""); 
+  const [sortOption, setSortOption] = useState<string>("");
 
   // Filtering
   const filteredProperties = properties.filter(p => {
@@ -145,25 +153,25 @@ export default function PropertiesPage() {
     return matchesSearch && statusMatch && typeMatch && amenitiesMatch && facingMatch && propertyMatch && priceMatch && selectedMatch;
   });
 
-// Sorting (apply AFTER filtering, BEFORE pagination)
-const sortedProperties = [...filteredProperties].sort((a, b) => {
-  switch (sortOption) {
-    case "priceDesc": return b.ListPrice - a.ListPrice;
-    case "priceAsc": return a.ListPrice - b.ListPrice;
-    case "sqmDesc": return b.GrossAreaSQM - a.GrossAreaSQM;
-    case "sqmAsc": return a.GrossAreaSQM - b.GrossAreaSQM;
-    case "rfoDesc": return new Date(b.RFODate).getTime() - new Date(a.RFODate).getTime();
-    case "rfoAsc": return new Date(a.RFODate).getTime() - new Date(b.RFODate).getTime();
-    default: return 0; // No sorting applied
-  }
-});
+  // Sorting
+  const sortedProperties = [...filteredProperties].sort((a, b) => {
+    switch (sortOption) {
+      case "priceDesc": return b.ListPrice - a.ListPrice;
+      case "priceAsc": return a.ListPrice - b.ListPrice;
+      case "sqmDesc": return b.GrossAreaSQM - a.GrossAreaSQM;
+      case "sqmAsc": return a.GrossAreaSQM - b.GrossAreaSQM;
+      case "rfoDesc": return new Date(b.RFODate).getTime() - new Date(a.RFODate).getTime();
+      case "rfoAsc": return new Date(a.RFODate).getTime() - new Date(b.RFODate).getTime();
+      default: return 0;
+    }
+  });
 
-// Pagination (apply AFTER sorting)
-const totalPages = Math.ceil(sortedProperties.length / rowsPerPage);
-const paginatedProperties = sortedProperties.slice(
-  (currentPage - 1) * rowsPerPage,
-  currentPage * rowsPerPage
-);
+  // Pagination
+  const totalPages = Math.ceil(sortedProperties.length / rowsPerPage);
+  const paginatedProperties = sortedProperties.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage
+  );
 
   const toggleUnitSelection = (unitId: string) => {
     const newSet = new Set(selectedUnits);
@@ -172,74 +180,73 @@ const paginatedProperties = sortedProperties.slice(
     setSelectedUnits(newSet);
   };
 
-const sortOptions = [
-  { value: "", label: "Default" },
-  { value: "priceDesc", label: "Price: High → Low" },
-  { value: "priceAsc", label: "Price: Low → High" },
-  { value: "sqmDesc", label: "Area: Big → Small" },
-  { value: "sqmAsc", label: "Area: Small → Big" },
-  { value: "rfoDesc", label: "RFO Date: Newest → Oldest" },
-  { value: "rfoAsc", label: "RFO Date: Oldest → Newest" },
-];
-
+  const sortOptions = [
+    { value: "", label: "Default" },
+    { value: "priceDesc", label: "Price: High → Low" },
+    { value: "priceAsc", label: "Price: Low → High" },
+    { value: "sqmDesc", label: "Area: Big → Small" },
+    { value: "sqmAsc", label: "Area: Small → Big" },
+    { value: "rfoDesc", label: "RFO Date: Newest → Oldest" },
+    { value: "rfoAsc", label: "RFO Date: Oldest → Newest" },
+  ];
 const glassySelectStyles = {
   control: (provided: any) => ({
     ...provided,
-    borderRadius: "1rem",
-    border: "1px solid rgba(255, 255, 255, 0.25)",
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
-    boxShadow: "0 4px 20px rgba(0, 0, 0, 0.1)",
-    color: "#f8fafc",
+    backgroundColor: "rgba(255, 255, 255, 0.08)", // glassy white
+    border: "1px solid rgba(255, 255, 255, 0.3)",
+    borderRadius: "12px",
+    backdropFilter: "blur(8px)",
+    color: "#ffffff",
+    padding: "4px",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+    "&:hover": {
+      borderColor: "rgba(255, 255, 255, 0.6)",
+    },
   }),
   menu: (provided: any) => ({
     ...provided,
-    borderRadius: "1rem",
-    marginTop: "6px",
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    backdropFilter: "blur(14px)",
-    WebkitBackdropFilter: "blur(14px)",
-    border: "1px solid rgba(255, 255, 255, 0.2)",
-    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.25)",
+    backgroundColor: "rgba(20, 20, 20, 0.95)", // dark glass
+    backdropFilter: "blur(6px)",
+    borderRadius: "12px",
+    color: "#ffffff",
   }),
   option: (provided: any, state: any) => ({
     ...provided,
-    backgroundColor: state.isSelected
-      ? "rgba(30, 64, 175, 0.7)" // deep blue selected
-      : state.isFocused
-      ? "rgba(250, 204, 21, 0.4)" // gold hover
+    backgroundColor: state.isFocused
+      ? "rgba(255, 255, 255, 0.15)" // hover state
       : "transparent",
-    color: state.isSelected ? "#fff" : "#f1f5f9",
+    color: "#ffffff",
     cursor: "pointer",
-  }),
-  multiValue: (provided: any) => ({
-    ...provided,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    backdropFilter: "blur(8px)",
-    borderRadius: "8px",
-  }),
-  multiValueLabel: (provided: any) => ({
-    ...provided,
-    color: "#f1f5f9",
-  }),
-  placeholder: (provided: any) => ({
-    ...provided,
-    color: "#85909eff",
   }),
   singleValue: (provided: any) => ({
     ...provided,
-    color: "#f8fafc",
+    color: "#ffffff",
+  }),
+  input: (provided: any) => ({
+    ...provided,
+    color: "#ffffff",
+  }),
+  placeholder: (provided: any) => ({
+    ...provided,
+    color: "rgba(255,255,255,0.6)",
   }),
 };
 
 
-  
   return (
     <main className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 p-6 text-gray-900 relative">
-      <h1 className="text-4xl md:text-5xl font-bold text-center text-blue-800 mb-10">
+      <h1 className="text-4xl md:text-5xl font-bold text-center text-blue-800 mb-4">
         Unit Availability
       </h1>
+
+      {/* ✅ New "Last Updated" info */}
+      {lastUpdated && (
+        <p className="text-center text-sm md:text-base text-gray-600 mb-6">
+          📅 <span className="font-semibold">Last Updated:</span>{" "}
+          {lastUpdated.date}, {lastUpdated.time} <br />
+          
+        </p>
+      )}
 
       {loading && <p className="text-center text-gray-500">⏳ Loading units...</p>}
       {error && <p className="text-center text-red-500">❌ {error}</p>}
