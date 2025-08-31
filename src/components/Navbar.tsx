@@ -128,7 +128,13 @@ export default function Navbar() {
           >
             Dashboard
           </Link>
-
+          <Link
+            href="/projects"
+            className="block text-lg hover:text-[#d4af37] transition-colors"
+            onClick={() => setIsOpen(false)}
+          >
+            Projects
+          </Link>
           {/* Mobile Unit Availability */}
           <div>
             <button
