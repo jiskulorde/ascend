@@ -13,11 +13,11 @@ body {
 
 /* Typography */
 h1, h2, h3, h4, h5, h6 {
-  @apply font-bold tracking-wide text-yellow-400;
+  @apply font-bold tracking-wide text-gray-700;
 }
 
 p {
-  @apply text-gray-200;
+  @apply text-gray-500;
 }
 
 /* Links */

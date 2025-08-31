@@ -8,7 +8,7 @@ export default function ProjectsPage() {
       name: "Allegra Garden Place",
       code: "AGP",
       description: "DMCI Homes project located in Pasig Boulevard, featuring modern high-rise living with resort-inspired amenities.",
-      image: "/images/agp-thumbnail.jpg", // replace with your actual thumbnail
+      img: "/images/agp/agp-bldg.png", // replace with your actual thumbnail
     },
     // Add more projects later...
   ];
@@ -26,7 +26,7 @@ export default function ProjectsPage() {
             className="bg-white rounded-2xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow"
           >
             <img
-              src={project.image}
+              src={project.img}
               alt={project.name}
               className="w-full h-48 object-cover"
             />
