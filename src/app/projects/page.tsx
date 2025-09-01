@@ -37,9 +37,9 @@ export default function ProjectsPage() {
               <p className="text-gray-600 mb-4">{project.description}</p>
               <Link
                 href={`/projects/${project.code}`}
-                className="inline-block px-4 py-2 rounded-lg bg-[#d4af37] text-white font-medium hover:bg-[#0a2540] transition-colors"
+                className="inline-block px-4 py-2 rounded-lg bg-[#ffda08] text-white font-medium hover:bg-[#0a2540] transition-colors"
               >
-                View Project
+                <span className="text-white mb-4">View Project</span>
               </Link>
             </div>
           </div>

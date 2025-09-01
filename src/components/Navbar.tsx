@@ -40,17 +40,17 @@ export default function Navbar() {
           href="/"
           className="text-2xl font-bold tracking-wide text-[#ffffff] hover:text-white transition-colors duration-300"
         >
-          Ascend
+          <span className="text-white mb-4">Ascend</span>
         </Link>
 
         {/* Desktop Nav */}
         <div className="space-x-6 hidden md:flex items-center">
           <Link href="/dashboard" className="nav-link">
-            Dashboard
+            <span className="text-white mb-4">Dashboard</span>
           </Link>
 
           <Link href="/projects" className="nav-link">
-            Projects
+            <span className="text-white mb-4">Projects</span>
           </Link>
 
           {/* Unit Availability */}
@@ -126,14 +126,14 @@ export default function Navbar() {
             className="block text-lg hover:text-[#d4af37] transition-colors"
             onClick={() => setIsOpen(false)}
           >
-            Dashboard
+            <span className="text-white mb-4">Dashboard</span>
           </Link>
           <Link
             href="/projects"
             className="block text-lg hover:text-[#d4af37] transition-colors"
             onClick={() => setIsOpen(false)}
           >
-            Projects
+            <span className="text-white mb-4">Projects</span>
           </Link>
           {/* Mobile Unit Availability */}
           <div>

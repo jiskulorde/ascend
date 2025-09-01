@@ -3,6 +3,7 @@ module.exports = {
   content: [
     "./src/app/**/*.{js,ts,jsx,tsx}",
     "./src/components/**/*.{js,ts,jsx,tsx}",
+    "./node_modules/@shadcn/ui/dist/**/*.{js,ts,jsx,tsx}"
   ],
   future: {
     disableColorOpacityUtilitiesByDefault: true,
@@ -23,5 +24,7 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    require("tailwindcss-animate")
+  ],
 };
