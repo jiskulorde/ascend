@@ -31,9 +31,9 @@ export default function LoginPage() {
       <section className="relative overflow-hidden">
         <div className="brand-hero absolute inset-0 opacity-15" />
         <div className="relative mx-auto max-w-7xl px-4 md:px-6 py-10">
-          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">Welcome back</h1>
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">Welcome</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Sign in to access your dashboard, availability tools, and more.
+            Sign in or create an account to access availability and tools.
           </p>
           <div className="mt-6">
             <Suspense fallback={<LoginSkeleton />}>

@@ -18,7 +18,7 @@ export default async function AvailabilityPage() {
     .eq("id", user.id)
     .single();
 
-  const allowed = profile?.role === "AGENT" || profile?.role === "MANAGER";
+  const allowed = profile?.role === "AGENT" || profile?.role === "MANAGER" || profile?.role === "CLIENT";
   if (!allowed) {
     redirect("/403");
   }
