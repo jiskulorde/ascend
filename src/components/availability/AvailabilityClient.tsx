@@ -208,16 +208,27 @@ export default function AvailabilityClient() {
                 Price: ₱{priceRange[0].toLocaleString()} – ₱{priceRange[1].toLocaleString()}
               </div>
               <Range
-                step={50_000}
-                min={0}
-                max={maxPrice || 10_000_000}
-                values={priceRange}
-                onChange={(v) => { setPriceRange(v as [number, number]); setCurrentPage(1); }}
-                renderTrack={({ props, children }) => (
-                  <div {...props} className="h-2 rounded-full bg-muted">{children}</div>
-                )}
-                renderThumb={({ props }) => <div {...props} className="h-4 w-4 rounded-full bg-[color:var(--primary)] shadow" />}
-              />
+  step={50_000}
+  min={0}
+  max={maxPrice || 10_000_000}
+  values={priceRange}
+  onChange={(v) => { setPriceRange(v as [number, number]); setCurrentPage(1); }}
+  renderTrack={({ props, children }) => (
+    <div {...props} className="h-2 rounded-full bg-muted">{children}</div>
+  )}
+  renderThumb={({ props }) => {
+    const { key, ...rest } = props as any; // ⬅️ pull key out
+    return (
+      <div
+        key={key}            // ⬅️ apply key directly
+        {...rest}            // ⬅️ spread the rest
+        className="h-4 w-4 rounded-full bg-[color:var(--primary)] shadow"
+        aria-label="Price range handle"
+      />
+    );
+  }}
+/>
+
             </div>
 
             <div className="grid grid-cols-2 gap-2">

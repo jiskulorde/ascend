@@ -119,7 +119,7 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
                     <div className={`${dropdownPanel} ${unitDropdownOpen ? dropdownOpen : dropdownClosed}`}>
                       {[
                         { label: "Looker", href: "/looker" },
-                        { label: "Availability", href: "/availability" }, // ✅ mobile fixed below too
+                        { label: "Properties", href: "/properties" }, // ✅ mobile fixed below too
                         { label: "Summary", href: "/summary" },
                       ].map((item) => (
                         <Link key={item.label} href={item.href} className="block px-3 py-2 text-sm hover:bg-muted rounded-lg mx-2 my-1">
@@ -215,7 +215,7 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
                     <div className="pl-3">
                       {[
                         { label: "Looker", href: "/looker" },
-                        { label: "Availability", href: "/availability" }, 
+                        { label: "Properties", href: "/properties" }, 
                         { label: "Summary", href: "/summary" },
                       ].map((item) => (
                         <Link

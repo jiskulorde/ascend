@@ -20,7 +20,7 @@ export default function HomePage() {
                 <Link href="/projects" className="btn btn-primary">
                   Browse Projects
                 </Link>
-                <Link href="/properties" className="btn btn-outline">
+                <Link href="/availability" className="btn btn-outline">
                   View Properties
                 </Link>
                 <Link href="/auth/login" className="btn btn-ghost">
