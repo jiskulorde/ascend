@@ -1,151 +1,165 @@
-"use client";
+import Link from "next/link";
 
-import Image from "next/image";
-import { useEffect, useState } from "react";
-import gsap from "gsap";
-import { useRouter } from "next/navigation";
-
-type Property = {
-  Property: string;
-  BuildingUnit: string;
-  Tower: string;
-  Floor: string;
-  Status: string;
-  Type: string;
-  GrossAreaSQM: number;
-  Amenities: string;
-  Facing: string;
-  RFODate: string;
-  ListPrice: number;
-  PerSQM: number;
-};
-
-export default function Home() {
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
-
-  useEffect(() => {
-    gsap.fromTo(
-      ".hero-text",
-      { opacity: 0, y: 50 },
-      { opacity: 1, y: 0, duration: 1, ease: "power3.out" }
-    );
-    gsap.fromTo(
-      ".hero-image",
-      { opacity: 0, scale: 0.9 },
-      { opacity: 1, scale: 1, duration: 1.2, ease: "power3.out", delay: 0.2 }
-    );
-  }, []);
-
-  useEffect(() => {
-    async function fetchProperties() {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/availability");
-        if (!res.ok) throw new Error("Failed to fetch properties");
-
-        const json = await res.json();
-        if (!json.success) throw new Error(json.error || "API returned error");
-
-        const rows = json.data;
-        const normalized: Property[] = rows.map((p: any) => ({
-          Property: p.Property || "",
-          BuildingUnit: p["Building Unit"] || "",
-          Tower: p.Tower || "",
-          Floor: p.Floor || "",
-          Status: p.Status || "",
-          Type: p.Type || "",
-          GrossAreaSQM: Number(p["Gross Area(SQM)"] || 0),
-          Amenities: p.Amenities || "",
-          Facing: p.Facing || "",
-          RFODate: p["RFO Date"] || "",
-          ListPrice:
-            parseFloat((p["List Price"] ? String(p["List Price"]) : "0").replace(/[^0-9.-]+/g, "")) || 0,
-          PerSQM:
-            parseFloat((p["per SQM"] ? String(p["per SQM"]) : "0").replace(/[^0-9.-]+/g, "")) || 0,
-        }));
-
-        setProperties(normalized.slice(0, 3));
-      } catch (err: any) {
-        setError(err.message || "Something went wrong");
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchProperties();
-  }, []);
-
+export default function HomePage() {
   return (
-    <main className="min-h-screen">
-      {/* Hero Section */}
-      <section className="section flex flex-col md:flex-row items-center justify-between bg-gradient-to-r from-blue-950 via-blue-900 to-blue-950 text-yellow-400">
-        <div className="hero-text max-w-xl">
-          <h1 className="text-4xl md:text-6xl font-bold mb-6">
-            Find Your Perfect <span className="text-yellow-500">DMCI Home</span>
-          </h1>
-          <p className="text-lg md:text-xl mb-8 text-yellow-300/90">
-            Explore our premium condominiums and communities designed to fit your lifestyle. Live in comfort, luxury, and convenience.
-          </p>
-          <div className="flex gap-4">
-            <button
-              className="primary"
-              onClick={() => router.push("/properties")}
-            >
-              Browse Properties
-            </button>
-            <button
-              className="secondary"
-            >
-              Contact Us
-            </button>
-          </div>
-        </div>
+    <main>
+      {/* HERO */}
+      <section className="relative overflow-hidden">
+        <div className="absolute inset-0 brand-hero" />
+        <div className="relative mx-auto max-w-7xl px-4 md:px-6 py-16 md:py-24">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
+            <div>
+              <h1 className="text-3xl md:text-5xl font-semibold tracking-tight">
+                Find your next <span className="accent">DMCI Homes</span> address.
+              </h1>
+              <p className="mt-4 text-base md:text-lg text-muted-foreground">
+                Explore projects, compare units, and connect with a sales consultant.
+                Team Ascend built this for buyers and partners—simple, fast, and mobile-friendly.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Link href="/projects" className="btn btn-primary">
+                  Browse Projects
+                </Link>
+                <Link href="/properties" className="btn btn-outline">
+                  View Properties
+                </Link>
+                <Link href="/auth/login" className="btn btn-ghost">
+                  Sign in
+                </Link>
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                Public preview: projects & properties are viewable without an account.
+              </p>
+            </div>
 
-        <div className="hero-image mt-12 md:mt-0 md:ml-12 flex-shrink-0">
-          <Image
-            src="/hero-condo.jpg"
-            alt="DMCI Homes"
-            width={500}
-            height={500}
-            className="rounded-2xl shadow-2xl"
-            priority
-          />
+            <div className="card p-0 overflow-hidden">
+              {/* Simple visual mock (replace with a real image later) */}
+              <div className="aspect-[16/10] bg-gradient-to-br from-[color:var(--primary)]/10 to-[color:var(--primary)]/30 grid place-items-center">
+                <div className="rounded-xl border border-border bg-white/70 backdrop-blur p-4 shadow-sm text-center">
+                  <div className="text-sm text-muted-foreground">Project Spotlight</div>
+                  <div className="mt-2 text-lg font-medium">Your next home in the city</div>
+                  <div className="mt-3 flex gap-2 justify-center">
+                    <span className="inline-flex items-center rounded-full bg-[color:var(--secondary)] px-2.5 py-1 text-xs">Near CBD</span>
+                    <span className="inline-flex items-center rounded-full bg-[color:var(--secondary)] px-2.5 py-1 text-xs">Resort amenities</span>
+                    <span className="inline-flex items-center rounded-full bg-[color:var(--secondary)] px-2.5 py-1 text-xs">Secure & serene</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>{/* end grid */}
         </div>
       </section>
 
-      {/* Featured Properties */}
-      <section className="section bg-white text-blue-900">
-        <h2 className="text-3xl font-bold text-center mb-10">
-          Featured Properties
-        </h2>
+      {/* FEATURE GRID */}
+      <section className="section">
+        <div className="mx-auto max-w-7xl">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Feature
+              title="Project directory"
+              desc="All current DMCI Homes projects in one place. Filter by location, status, and timeline."
+            />
+            <Feature
+              title="Property search"
+              desc="Browse by tower, facing, size, or RFO date. Save units to compare side-by-side."
+            />
+            <Feature
+              title="Talk to a consultant"
+              desc="Reach our sales team to get advised options, promos, and next steps—no pushy sales."
+            />
+          </div>
+        </div>
+      </section>
 
-        {loading && <p className="text-center text-gray-400">⏳ Loading properties...</p>}
-        {error && <p className="text-center text-red-500">❌ {error}</p>}
+      {/* FEATURED PROJECTS (static placeholders; link to your pages) */}
+      <section className="section pt-0">
+        <div className="mx-auto max-w-7xl">
+          <header className="flex items-end justify-between mb-4">
+            <h2 className="text-xl md:text-2xl font-semibold">Featured projects</h2>
+            <Link href="/projects" className="text-sm hover:underline">See all</Link>
+          </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {!loading && !error && properties.map((p, i) => (
-            <div key={i} className="card">
-              <Image
-                src={`/property${i + 1}.jpg`}
-                alt={p.Property}
-                width={400}
-                height={250}
-                className="rounded-xl mb-4"
-              />
-              <h3 className="text-xl font-semibold mb-2">{p.Property}</h3>
-              <p className="mb-4">{p.Type} · {p.GrossAreaSQM} sqm</p>
-              <button
-                className="primary"
-                onClick={() => router.push("/properties")}
-              >
-                View Details
-              </button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <ProjectCard
+              title="Allegra Garden Place (AGP)"
+              href="/projects/AGP"
+              tags={["Pasig", "Pre-selling", "Near BGC"]}
+            />
+            <ProjectCard
+              title="Alder Residences (ALD)"
+              href="/projects/ALD"
+              tags={["Taguig", "Mid-rise", "Family-friendly"]}
+            />
+            <ProjectCard
+              title="More soon"
+              href="/projects"
+              tags={["Directory", "Filters", "Map view"]}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* CTA STRIP */}
+      <section className="section border-t-4 border-[color:var(--primary)]/10">
+        <div className="mx-auto max-w-7xl px-4 md:px-6">
+          <div className="rounded-[var(--radius-lg)] bg-[color:var(--primary)] text-[color:var(--primary-foreground)] p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg md:text-xl font-semibold">New to DMCI Homes?</h3>
+              <p className="text-sm opacity-90">
+                Read our upcoming Buyer’s Guide and talk to a consultant for a stress-free buying experience.
+              </p>
             </div>
-          ))}
+            <div className="flex gap-2">
+              <Link href="/projects" className="btn bg-white text-foreground hover:brightness-95">
+                Browse Projects
+              </Link>
+              <Link href="/auth/login" className="btn btn-ghost">
+                Sign in
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
     </main>
+  );
+}
+
+/* --- tiny presentational helpers --- */
+function Feature({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="card p-6">
+      <h3 className="text-base md:text-lg font-semibold">{title}</h3>
+      <p className="mt-2 text-sm text-muted-foreground">{desc}</p>
+    </div>
+  );
+}
+
+function ProjectCard({
+  title,
+  href,
+  tags,
+}: {
+  title: string;
+  href: string;
+  tags: string[];
+}) {
+  return (
+    <Link href={href} className="card p-0 overflow-hidden group">
+      <div className="aspect-[16/10] bg-muted/50 grid place-items-center">
+        <div className="rounded-md border border-border bg-white/70 backdrop-blur px-3 py-2 text-sm shadow-sm">
+          Project image
+        </div>
+      </div>
+      <div className="p-4">
+        <div className="font-medium">{title}</div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {tags.map((t) => (
+            <span key={t} className="inline-flex items-center rounded-full bg-[color:var(--secondary)] px-2.5 py-1 text-[11px]">
+              {t}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="h-1 bg-transparent group-hover:bg-[color:var(--primary)] transition-all" />
+    </Link>
   );
 }
