@@ -1,10 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Select from "react-select";
+import { makeUnitId, matchesLegacyOrCanonical } from "@/lib/unit-id";
 
-type PropertyRow = {
+type UnitRow = {
+  property_code: string;
+  property_name: string;
+  city: string;
+  address: string;
+  tower_code: string;
+  tower_name: string;
+
   Property: string;
   BuildingUnit: string;
   Tower: string;
@@ -17,107 +25,90 @@ type PropertyRow = {
   RFODate: string;
   ListPrice: number;
   PerSQM: number;
+
+  unit_id: string;
 };
 
 type Option = { value: string; label: string };
 
-const makeUnitId = (p: PropertyRow) =>
-  `${p.Property}_${p.Tower}_${p.Floor}_${p.BuildingUnit}`.replace(/\s+/g, "_");
+const parseMoney = (raw: any) =>
+  parseFloat(String(raw ?? "0").replace(/[^0-9.-]+/g, "")) || 0;
 
 export default function ComputationPage() {
   const router = useRouter();
   const params = useParams();
-  // route param name is [unitID] — use the key you actually used in the filename
   const unitIdFromUrl = decodeURIComponent((params?.unitID as string) || "");
 
-  const [rows, setRows] = useState<PropertyRow[]>([]);
+  const [rows, setRows] = useState<UnitRow[]>([]);
   const [selectedUnitId, setSelectedUnitId] = useState<string>(unitIdFromUrl);
 
+  // Inputs
   const [discountPct, setDiscountPct] = useState<number>(0);
   const [downPct, setDownPct] = useState<number>(20);
   const [monthsToPay, setMonthsToPay] = useState<number>(36);
   const [reservationFee, setReservationFee] = useState<number>(20000);
   const [closingFeePct, setClosingFeePct] = useState<number>(10.5);
-
   const [rate15yr, setRate15yr] = useState<number>(6);
   const [rate20yr, setRate20yr] = useState<number>(6);
 
   const sheetRef = useRef<HTMLDivElement | null>(null);
 
+  // Load enriched availability
   useEffect(() => {
-    async function fetchData() {
-      const res = await fetch("/api/availability");
+    (async () => {
+      const res = await fetch("/api/availability", { cache: "no-store" });
       const json = await res.json();
-      const data = Array.isArray(json.data) ? json.data : [];
-      setRows(
-        data.map((p: any) => ({
-          Property: p.Property || "",
-          BuildingUnit: p["Building Unit"] || "",
-          Tower: p.Tower || "",
-          Floor: p.Floor || "",
-          Status: p.Status || "",
-          Type: p.Type || "",
-          GrossAreaSQM: Number(p["Gross Area(SQM)"] || 0),
-          Amenities: p.Amenities || "",
-          Facing: p.Facing || "",
-          RFODate: p["RFO Date"] || "",
-          ListPrice:
-            parseFloat((p["List Price"] || "0").replace(/[^0-9.-]+/g, "")) ||
-            0,
-          PerSQM:
-            parseFloat((p["per SQM"] || "0").replace(/[^0-9.-]+/g, "")) || 0,
-        }))
-      );
-    }
-    fetchData();
+      const data: UnitRow[] = Array.isArray(json.data) ? json.data : [];
+      setRows(data);
+    })();
   }, []);
 
-  const selectedUnit = useMemo(
-    () => rows.find((p) => makeUnitId(p) === selectedUnitId),
-    [rows, selectedUnitId]
-  );
+  // Selected unit (support canonical + legacy)
+  const selectedUnit = useMemo(() => {
+    return rows.find((u) =>
+      matchesLegacyOrCanonical(
+        { property_code: u.property_code, tower_code: u.tower_code, building_unit: u.BuildingUnit },
+        selectedUnitId
+      )
+    );
+  }, [rows, selectedUnitId]);
 
-  // Keep selectedUnitId synced with URL when rows load
+  // If URL contains a valid id, sync it
   useEffect(() => {
-    if (rows.length > 0 && unitIdFromUrl) {
-      const exists = rows.some((p) => makeUnitId(p) === unitIdFromUrl);
-      if (exists) {
-        setSelectedUnitId(unitIdFromUrl);
-      }
-    }
+    if (!rows.length || !unitIdFromUrl) return;
+    const exists = rows.some((u) =>
+      matchesLegacyOrCanonical(
+        { property_code: u.property_code, tower_code: u.tower_code, building_unit: u.BuildingUnit },
+        unitIdFromUrl
+      )
+    );
+    if (exists) setSelectedUnitId(unitIdFromUrl);
   }, [rows, unitIdFromUrl]);
 
+  // Select options
   const unitOptions: Option[] = useMemo(
     () =>
-      rows.map((p) => {
-        const id = makeUnitId(p);
-        return {
-          value: id,
-          label: `${p.Property} • ${p.BuildingUnit} • ₱${p.ListPrice.toLocaleString()}`,
-        };
-      }),
+      rows.map((u) => ({
+        value: u.unit_id, // canonical id from API
+        label: `${u.property_name} • ${u.tower_name || u.tower_code} • ${u.BuildingUnit} • ₱${u.ListPrice.toLocaleString()}`,
+      })),
     [rows]
   );
 
   const selectedOption = useMemo(
-    () => unitOptions.find((opt) => opt.value === selectedUnitId) || null,
+    () => unitOptions.find((o) => o.value === selectedUnitId) || null,
     [unitOptions, selectedUnitId]
   );
 
+  // Math
   const fmtPhp = (n: number) =>
-    new Intl.NumberFormat("en-PH", {
-      style: "currency",
-      currency: "PHP",
-      maximumFractionDigits: 2,
-    }).format(n);
-
+    new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 2 }).format(n);
   const TCP = (selectedUnit?.ListPrice || 0) * (1 - discountPct / 100);
   const dpAmount = (TCP * downPct) / 100;
   const netDp = Math.max(0, dpAmount - reservationFee);
   const dpMonthly = monthsToPay > 0 ? netDp / monthsToPay : 0;
   const closingFee = (TCP * closingFeePct) / 100;
   const bankBalance = Math.max(0, TCP - dpAmount);
-
   const amort = (principal: number, annual: number, years: number) => {
     const r = annual / 100 / 12;
     const n = years * 12;
@@ -129,28 +120,21 @@ export default function ComputationPage() {
   const validityText = (() => {
     const now = new Date();
     const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    return `VALID UNTIL: ${last.toLocaleDateString("en-US", {
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    })} (subject to unit availability)`;
+    return `VALID UNTIL: ${last.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} (subject to availability)`;
   })();
 
-  const getSafeFileStem = (stem: string) => (stem || "computation").replace(/[^\w\-]+/g, "_");
+  const safeFileStem = (s: string) => (s || "computation").replace(/[^\w\-]+/g, "_");
 
-  // ---------- Downloads using html-to-image ----------
+  // Downloads
   const downloadPNG = async () => {
     if (!sheetRef.current) return;
-    // dynamic import so server-side doesn't try to resolve it
     const { toPng } = await import("html-to-image");
-    // cacheBust helps with external images/CSS in some environments
-    const dataUrl = await toPng(sheetRef.current, { cacheBust: true, pixelRatio: 2 });
+    const url = await toPng(sheetRef.current, { cacheBust: true, pixelRatio: 2 });
     const a = document.createElement("a");
-    a.href = dataUrl;
-    a.download = `${getSafeFileStem(selectedUnitId)}.png`;
+    a.href = url;
+    a.download = `${safeFileStem(selectedUnitId)}.png`;
     a.click();
   };
-
   const downloadPDF = async () => {
     if (!sheetRef.current) return;
     const { toPng } = await import("html-to-image");
@@ -158,28 +142,29 @@ export default function ComputationPage() {
     const { jsPDF } = await import("jspdf");
     const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
     const pageWidth = pdf.internal.pageSize.getWidth();
-    // create an image object to compute height scaling safely
     const img = new Image();
     img.src = imgData;
-    await new Promise((res) => (img.onload = res));
+    await new Promise((r) => (img.onload = r));
     const scale = pageWidth / img.width;
-    const imgHeight = img.height * scale;
-    pdf.addImage(imgData, "PNG", 0, 0, pageWidth, imgHeight);
-    pdf.save(`${getSafeFileStem(selectedUnitId)}.pdf`);
+    pdf.addImage(imgData, "PNG", 0, 0, pageWidth, img.height * scale);
+    pdf.save(`${safeFileStem(selectedUnitId)}.pdf`);
   };
-
   const downloadExcel = async () => {
     const XLSX = await import("xlsx");
+    const u = selectedUnit!;
     const data = [
-      ["Project", selectedUnit?.Property || ""],
-      ["Unit", selectedUnit?.BuildingUnit || ""],
-      ["Type", selectedUnit?.Type || ""],
-      ["Floor", selectedUnit?.Floor || ""],
-      ["Area (SQM)", selectedUnit?.GrossAreaSQM || 0],
-      ["Facing", selectedUnit?.Facing || ""],
-      ["RFO Date", selectedUnit?.RFODate || ""],
+      ["Project", u.property_name],
+      ["City", u.city],
+      ["Address", u.address],
+      ["Tower", u.tower_name || u.tower_code],
+      ["Unit", u.BuildingUnit],
+      ["Type", u.Type],
+      ["Floor", u.Floor],
+      ["Area (SQM)", u.GrossAreaSQM],
+      ["Facing", u.Facing],
+      ["RFO Date", u.RFODate],
       [],
-      ["List Price", selectedUnit?.ListPrice || 0],
+      ["List Price", u.ListPrice],
       ["Discount %", discountPct],
       ["TCP", TCP],
       ["Downpayment %", downPct],
@@ -197,68 +182,59 @@ export default function ComputationPage() {
     const ws = XLSX.utils.aoa_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Computation");
-    XLSX.writeFile(wb, `${getSafeFileStem(selectedUnitId)}.xlsx`);
+    XLSX.writeFile(wb, `${safeFileStem(selectedUnitId)}.xlsx`);
   };
 
-  const adjustmentInputs: { key: string; label: string; value: number; onChange: (n: number) => void; step?: number }[] = [
-    { key: "discount", label: "Special Discount %", value: discountPct, onChange: setDiscountPct, step: 0.1 },
-    { key: "down", label: "Downpayment %", value: downPct, onChange: setDownPct, step: 0.1 },
-    { key: "months", label: "Months to Pay", value: monthsToPay, onChange: (n) => setMonthsToPay(Math.max(1, Math.floor(n))) },
-    { key: "resfee", label: "Reservation Fee", value: reservationFee, onChange: (n) => setReservationFee(Math.max(0, Math.floor(n))) },
-    { key: "closing", label: "Closing Fee %", value: closingFeePct, onChange: setClosingFeePct, step: 0.1 },
+  const adjustmentInputs = [
+    { key: "discount", label: "Special Discount %", value: discountPct, step: 0.1, onChange: setDiscountPct },
+    { key: "down", label: "Downpayment %", value: downPct, step: 0.1, onChange: setDownPct },
+    { key: "months", label: "Months to Pay", value: monthsToPay, step: 1, onChange: (n: number) => setMonthsToPay(Math.max(1, Math.floor(n))) },
+    { key: "res", label: "Reservation Fee", value: reservationFee, step: 1000, onChange: (n: number) => setReservationFee(Math.max(0, Math.floor(n))) },
+    { key: "closing", label: "Closing Fee %", value: closingFeePct, step: 0.1, onChange: setClosingFeePct },
   ];
 
   return (
     <main className="min-h-screen flex bg-gray-50">
       {/* Sidebar */}
       <aside className="w-72 p-4 bg-white shadow-xl rounded-2xl sticky top-4 m-4 h-fit">
+        <button onClick={() => router.back()} className="w-full mb-4 inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">
+          ← Back
+        </button>
+
         <h3 className="font-semibold mb-3 text-blue-900 text-sm">Adjustments</h3>
         <div className="space-y-3 text-sm">
-          {adjustmentInputs.map(({ key, label, value, onChange, step }) => (
+          {adjustmentInputs.map(({ key, label, value, step, onChange }) => (
             <label key={key} className="block text-xs">
               {label}
               <input
                 type="number"
-                step={step ?? 1}
-                value={Number.isFinite(value) ? value : 0}
-                onChange={(e) => onChange(Number(e.target.value || 0))}
+                step={step}
+                value={Number.isFinite(value as number) ? (value as number) : 0}
+                onChange={(e) => (onChange as any)(Number(e.target.value || 0))}
                 onFocus={(e) => e.currentTarget.select()}
                 className="mt-1 w-full px-2 py-1 border rounded"
               />
             </label>
           ))}
         </div>
+
         <h3 className="font-semibold mt-6 mb-3 text-blue-900 text-sm">Bank Rates</h3>
         <div className="space-y-3 text-sm">
           <label className="block text-xs">
             15 years %
-            <input
-              type="number"
-              step={0.1}
-              value={rate15yr}
-              onChange={(e) => setRate15yr(Number(e.target.value || 0))}
-              onFocus={(e) => e.currentTarget.select()}
-              className="mt-1 w-full px-2 py-1 border rounded"
-            />
+            <input type="number" step={0.1} value={rate15yr} onChange={(e) => setRate15yr(Number(e.target.value || 0))} onFocus={(e) => e.currentTarget.select()} className="mt-1 w-full px-2 py-1 border rounded" />
           </label>
           <label className="block text-xs">
             20 years %
-            <input
-              type="number"
-              step={0.1}
-              value={rate20yr}
-              onChange={(e) => setRate20yr(Number(e.target.value || 0))}
-              onFocus={(e) => e.currentTarget.select()}
-              className="mt-1 w-full px-2 py-1 border rounded"
-            />
+            <input type="number" step={0.1} value={rate20yr} onChange={(e) => setRate20yr(Number(e.target.value || 0))} onFocus={(e) => e.currentTarget.select()} className="mt-1 w-full px-2 py-1 border rounded" />
           </label>
         </div>
       </aside>
 
-      {/* Main content */}
+      {/* Main */}
       <section className="flex-1 flex flex-col items-center p-4 overflow-auto">
-        {/* Always show search */}
-        <div className="bg-white rounded-xl p-4 shadow-sm border max-w-lg w-full mb-4">
+        {/* Unit picker */}
+        <div className="bg-white rounded-xl p-4 shadow-sm border max-w-2xl w-full mb-4">
           <p className="font-semibold mb-2 text-blue-900">Select a unit to compute</p>
           <Select
             options={unitOptions}
@@ -267,31 +243,33 @@ export default function ComputationPage() {
               const id = (opt as Option)?.value;
               if (id) {
                 setSelectedUnitId(id);
-                router.replace(`/computation/${encodeURIComponent(id)}`);
+                window.history.replaceState(null, "", `/computation/${encodeURIComponent(id)}`);
               }
             }}
             placeholder="Search unit…"
           />
         </div>
 
-        {selectedUnit && (
+        {/* Sheet */}
+        {selectedUnit ? (
           <div className="w-full max-w-3xl flex flex-col items-center space-y-4">
             <div ref={sheetRef} className="bg-white rounded-xl shadow-md w-full border overflow-hidden">
               {/* Header */}
               <div className="bg-blue-900 text-white p-6 rounded-t-xl">
-                <h1 className="text-2xl font-bold">{selectedUnit.Property}</h1>
-                <p>{selectedUnit.Tower}</p>
-                <p className="mt-2 text-red-300 font-semibold">{validityText}</p>
+                <h1 className="text-2xl font-bold">{selectedUnit.property_name}</h1>
+                <p className="opacity-90">{selectedUnit.tower_name || selectedUnit.tower_code}</p>
+                <p className="mt-2 text-blue-100">{selectedUnit.address || selectedUnit.city}</p>
+                <p className="mt-2 text-blue-100 font-semibold">{validityText}</p>
               </div>
 
-              {/* Info Table */}
+              {/* Info row */}
               <div className="p-4 border-b text-sm grid sm:grid-cols-3 gap-2">
                 <div>Turnover date: <span className="font-semibold text-blue-900">{selectedUnit.RFODate}</span></div>
-                <div>Building | Unit type: <span className="font-semibold text-blue-900">{selectedUnit.BuildingUnit} | {selectedUnit.Type}</span></div>
-                <div>Total area: <span className="font-semibold text-blue-900">{selectedUnit.GrossAreaSQM}</span></div>
+                <div>Unit: <span className="font-semibold text-blue-900">{selectedUnit.BuildingUnit} • {selectedUnit.Type}</span></div>
+                <div>Area: <span className="font-semibold text-blue-900">{selectedUnit.GrossAreaSQM} sqm</span></div>
               </div>
 
-              {/* Computation Table */}
+              {/* Computation table */}
               <div className="p-4">
                 <table className="w-full text-sm border-collapse">
                   <tbody>
@@ -349,13 +327,16 @@ export default function ComputationPage() {
               </div>
             </div>
 
-            {/* Download Buttons */}
+            {/* Actions */}
             <div className="flex gap-3 mt-2">
-              <button onClick={downloadPNG} className="px-4 py-2 bg-blue-600 text-white rounded-lg">Download PNG</button>
-              <button onClick={downloadPDF} className="px-4 py-2 bg-green-600 text-white rounded-lg">Download PDF</button>
-              <button onClick={downloadExcel} className="px-4 py-2 bg-yellow-500 text-white rounded-lg">Download Excel</button>
+              <button onClick={() => router.back()} className="px-4 py-2 border rounded-lg">← Back</button>
+              <button onClick={downloadPNG} className="px-4 py-2 bg-blue-600 text-white rounded-lg">PNG</button>
+              <button onClick={downloadPDF} className="px-4 py-2 bg-green-600 text-white rounded-lg">PDF</button>
+              <button onClick={downloadExcel} className="px-4 py-2 bg-yellow-500 text-white rounded-lg">Excel</button>
             </div>
           </div>
+        ) : (
+          <p className="text-gray-600 mt-8">Select a unit to see the computation.</p>
         )}
       </section>
     </main>
