@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Select from "react-select";
-import { makeUnitId, matchesLegacyOrCanonical } from "@/lib/unit-id";
+import { matchesLegacyOrCanonical } from "@/lib/unit-id";
 
 type UnitRow = {
   property_code: string;
@@ -31,16 +31,16 @@ type UnitRow = {
 
 type Option = { value: string; label: string };
 
-const parseMoney = (raw: any) =>
-  parseFloat(String(raw ?? "0").replace(/[^0-9.-]+/g, "")) || 0;
-
 export default function ComputationPage() {
   const router = useRouter();
   const params = useParams();
   const unitIdFromUrl = decodeURIComponent((params?.unitID as string) || "");
 
+  const [mounted, setMounted] = useState(false);            // avoids SSR style mismatch
   const [rows, setRows] = useState<UnitRow[]>([]);
   const [selectedUnitId, setSelectedUnitId] = useState<string>(unitIdFromUrl);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
 
   // Inputs
   const [discountPct, setDiscountPct] = useState<number>(0);
@@ -51,16 +51,53 @@ export default function ComputationPage() {
   const [rate15yr, setRate15yr] = useState<number>(6);
   const [rate20yr, setRate20yr] = useState<number>(6);
 
+  // UI state: mobile & desktop panel
+  const [isAdjustOpen, setIsAdjustOpen] = useState(false);  // mobile bottom sheet
+  const [floatPanel, setFloatPanel] = useState(false);      // desktop undock
+  const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null);
+
   const sheetRef = useRef<HTMLDivElement | null>(null);
 
-  // Load enriched availability
-  useEffect(() => {
-    (async () => {
-      const res = await fetch("/api/availability", { cache: "no-store" });
+  useEffect(() => setMounted(true), []);
+
+  // —— Load availability once (with safe absolute URL + error handling)
+  const fetchRows = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const url = `${origin}/api/availability`;
+
+      const res = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+        headers: { accept: "application/json" },
+      });
+
+      if (!res.ok) {
+        const preview = await res.text();
+        throw new Error(`API ${res.status} ${res.statusText} — ${preview.slice(0, 200)}`);
+      }
+
       const json = await res.json();
       const data: UnitRow[] = Array.isArray(json.data) ? json.data : [];
       setRows(data);
-    })();
+      localStorage.setItem("comp_rows_cache", JSON.stringify(data));
+    } catch (err: any) {
+      const cached = localStorage.getItem("comp_rows_cache");
+      if (cached) {
+        try { setRows(JSON.parse(cached)); } catch {}
+      }
+      console.error("Failed to fetch /api/availability:", err);
+      setLoadError(err?.message || "Failed to fetch");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRows();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Selected unit (support canonical + legacy)
@@ -73,7 +110,7 @@ export default function ComputationPage() {
     );
   }, [rows, selectedUnitId]);
 
-  // If URL contains a valid id, sync it
+  // Sync URL if id is valid
   useEffect(() => {
     if (!rows.length || !unitIdFromUrl) return;
     const exists = rows.some((u) =>
@@ -85,11 +122,11 @@ export default function ComputationPage() {
     if (exists) setSelectedUnitId(unitIdFromUrl);
   }, [rows, unitIdFromUrl]);
 
-  // Select options
+  // Options
   const unitOptions: Option[] = useMemo(
     () =>
       rows.map((u) => ({
-        value: u.unit_id, // canonical id from API
+        value: u.unit_id,
         label: `${u.property_name} • ${u.tower_name || u.tower_code} • ${u.BuildingUnit} • ₱${u.ListPrice.toLocaleString()}`,
       })),
     [rows]
@@ -100,15 +137,17 @@ export default function ComputationPage() {
     [unitOptions, selectedUnitId]
   );
 
-  // Math
+  // Formatting & math
   const fmtPhp = (n: number) =>
     new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 2 }).format(n);
+
   const TCP = (selectedUnit?.ListPrice || 0) * (1 - discountPct / 100);
   const dpAmount = (TCP * downPct) / 100;
   const netDp = Math.max(0, dpAmount - reservationFee);
   const dpMonthly = monthsToPay > 0 ? netDp / monthsToPay : 0;
   const closingFee = (TCP * closingFeePct) / 100;
   const bankBalance = Math.max(0, TCP - dpAmount);
+
   const amort = (principal: number, annual: number, years: number) => {
     const r = annual / 100 / 12;
     const n = years * 12;
@@ -120,7 +159,7 @@ export default function ComputationPage() {
   const validityText = (() => {
     const now = new Date();
     const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    return `VALID UNTIL: ${last.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} (subject to availability)`;
+    return `VALID UNTIL: ${last.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} • may vary with unit availability`;
   })();
 
   const safeFileStem = (s: string) => (s || "computation").replace(/[^\w\-]+/g, "_");
@@ -185,6 +224,39 @@ export default function ComputationPage() {
     XLSX.writeFile(wb, `${safeFileStem(selectedUnitId)}.xlsx`);
   };
 
+  // ——— Desktop drag helpers (only when floating) ———
+  const onDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!floatPanel || !mounted) return;
+    const start = "touches" in e ? e.touches[0] : (e as React.MouseEvent);
+    const startX = start.clientX;
+    const startY = start.clientY;
+    const startPos =
+      panelPos ??
+      {
+        x: Math.max(16, (typeof window !== "undefined" ? window.innerWidth : 1200) - 360),
+        y: Math.max(16, (typeof window !== "undefined" ? window.innerHeight : 800) - 480),
+      };
+
+    const move = (ev: any) => {
+      const p = "touches" in ev ? ev.touches[0] : ev;
+      setPanelPos({
+        x: startPos.x + (p.clientX - startX),
+        y: startPos.y + (p.clientY - startY),
+      });
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", up);
+    };
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    window.addEventListener("touchmove", move);
+    window.addEventListener("touchend", up);
+  };
+
   const adjustmentInputs = [
     { key: "discount", label: "Special Discount %", value: discountPct, step: 0.1, onChange: setDiscountPct },
     { key: "down", label: "Downpayment %", value: downPct, step: 0.1, onChange: setDownPct },
@@ -194,15 +266,37 @@ export default function ComputationPage() {
   ];
 
   return (
-    <main className="min-h-screen flex bg-gray-50">
-      {/* Sidebar */}
-      <aside className="w-72 p-4 bg-white shadow-xl rounded-2xl sticky top-4 m-4 h-fit">
-        <button onClick={() => router.back()} className="w-full mb-4 inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">
-          ← Back
-        </button>
+    <main className="min-h-screen flex bg-[#f6f7fb]">
+      {/* ——————————— Desktop sidebar (sticky or floating) ——————————— */}
+      <aside
+        className={`hidden md:block ${floatPanel ? "fixed z-50 w-80" : "w-72 sticky top-4 m-4"} bg-white shadow-xl rounded-2xl h-fit`}
+        style={floatPanel && mounted && panelPos ? { left: panelPos.x, top: panelPos.y } : undefined}
+      >
+        {/* Header with drag & float toggles */}
+        <div
+          onMouseDown={onDragStart}
+          onTouchStart={onDragStart}
+          className="flex items-center justify-between gap-2 px-4 py-2 border-b rounded-t-2xl cursor-move select-none"
+          title={floatPanel ? "Drag me" : "Click Float to undock"}
+        >
+          <div className="text-sm font-semibold text-blue-900">Adjustments</div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setFloatPanel((v) => !v)}
+              className="text-xs rounded-lg border px-2 py-1 hover:bg-gray-50"
+            >
+              {floatPanel ? "Dock" : "Float"}
+            </button>
+            <button
+              onClick={() => router.back()}
+              className="text-xs rounded-lg border px-2 py-1 hover:bg-gray-50"
+            >
+              ← Back
+            </button>
+          </div>
+        </div>
 
-        <h3 className="font-semibold mb-3 text-blue-900 text-sm">Adjustments</h3>
-        <div className="space-y-3 text-sm">
+        <div className="p-4 space-y-3 text-sm">
           {adjustmentInputs.map(({ key, label, value, step, onChange }) => (
             <label key={key} className="block text-xs">
               {label}
@@ -218,25 +312,42 @@ export default function ComputationPage() {
           ))}
         </div>
 
-        <h3 className="font-semibold mt-6 mb-3 text-blue-900 text-sm">Bank Rates</h3>
-        <div className="space-y-3 text-sm">
-          <label className="block text-xs">
-            15 years %
-            <input type="number" step={0.1} value={rate15yr} onChange={(e) => setRate15yr(Number(e.target.value || 0))} onFocus={(e) => e.currentTarget.select()} className="mt-1 w-full px-2 py-1 border rounded" />
-          </label>
-          <label className="block text-xs">
-            20 years %
-            <input type="number" step={0.1} value={rate20yr} onChange={(e) => setRate20yr(Number(e.target.value || 0))} onFocus={(e) => e.currentTarget.select()} className="mt-1 w-full px-2 py-1 border rounded" />
-          </label>
+        <div className="px-4 py-3 border-t">
+          <h3 className="font-semibold mb-3 text-blue-900 text-sm">Bank Rates</h3>
+          <div className="space-y-3 text-sm">
+            <label className="block text-xs">
+              15 years %
+              <input
+                type="number"
+                step={0.1}
+                value={rate15yr}
+                onChange={(e) => setRate15yr(Number(e.target.value || 0))}
+                onFocus={(e) => e.currentTarget.select()}
+                className="mt-1 w-full px-2 py-1 border rounded"
+              />
+            </label>
+            <label className="block text-xs">
+              20 years %
+              <input
+                type="number"
+                step={0.1}
+                value={rate20yr}
+                onChange={(e) => setRate20yr(Number(e.target.value || 0))}
+                onFocus={(e) => e.currentTarget.select()}
+                className="mt-1 w-full px-2 py-1 border rounded"
+              />
+            </label>
+          </div>
         </div>
       </aside>
 
-      {/* Main */}
-      <section className="flex-1 flex flex-col items-center p-4 overflow-auto">
+      {/* ——————————— Main ——————————— */}
+      <section className="flex-1 flex flex-col items-center p-4 md:pl-0 overflow-auto">
         {/* Unit picker */}
         <div className="bg-white rounded-xl p-4 shadow-sm border max-w-2xl w-full mb-4">
           <p className="font-semibold mb-2 text-blue-900">Select a unit to compute</p>
           <Select
+            instanceId="comp-unit-select"
             options={unitOptions}
             value={selectedOption}
             onChange={(opt) => {
@@ -250,79 +361,154 @@ export default function ComputationPage() {
           />
         </div>
 
+        {/* Error banner */}
+        {loadError && (
+          <div className="max-w-3xl w-full mb-3">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              <div className="font-semibold mb-1">Couldn’t load availability.</div>
+              <div className="opacity-80 break-all">{loadError}</div>
+              <button
+                className="mt-2 inline-flex items-center rounded border px-3 py-1 text-xs hover:bg-red-100"
+                onClick={fetchRows}
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Sheet */}
         {selectedUnit ? (
           <div className="w-full max-w-3xl flex flex-col items-center space-y-4">
             <div ref={sheetRef} className="bg-white rounded-xl shadow-md w-full border overflow-hidden">
-              {/* Header */}
+              {/* Brand header */}
               <div className="bg-blue-900 text-white p-6 rounded-t-xl">
                 <h1 className="text-2xl font-bold">{selectedUnit.property_name}</h1>
                 <p className="opacity-90">{selectedUnit.tower_name || selectedUnit.tower_code}</p>
-                <p className="mt-2 text-blue-100">{selectedUnit.address || selectedUnit.city}</p>
-                <p className="mt-2 text-blue-100 font-semibold">{validityText}</p>
+                                <p className="mt-1 text-blue-100">{selectedUnit.address || selectedUnit.city}</p>
+              </div>
+
+              {/* VALID UNTIL */}
+              <div className="px-4 py-2 border-b">
+                <span className="text-[13px] font-semibold text-red-600">{validityText}</span>
               </div>
 
               {/* Info row */}
-              <div className="p-4 border-b text-sm grid sm:grid-cols-3 gap-2">
-                <div>Turnover date: <span className="font-semibold text-blue-900">{selectedUnit.RFODate}</span></div>
-                <div>Unit: <span className="font-semibold text-blue-900">{selectedUnit.BuildingUnit} • {selectedUnit.Type}</span></div>
-                <div>Area: <span className="font-semibold text-blue-900">{selectedUnit.GrossAreaSQM} sqm</span></div>
+              <div className="p-4 border-b text-[13px] grid sm:grid-cols-3 gap-2 bg-[#fcfdff]">
+                <div>
+                  Turnover date:{" "}
+                  <span className="font-semibold text-blue-900">{selectedUnit.RFODate || "TBA"}</span>
+                </div>
+                <div>
+                  Building | Unit type:{" "}
+                  <span className="font-semibold text-blue-900">
+                    {selectedUnit.BuildingUnit} | {selectedUnit.Type}
+                  </span>
+                </div>
+                <div>
+                  Total area:{" "}
+                  <span className="font-semibold text-blue-900">{selectedUnit.GrossAreaSQM} sqm</span>
+                </div>
               </div>
 
               {/* Computation table */}
               <div className="p-4">
                 <table className="w-full text-sm border-collapse">
                   <tbody>
-                    <tr className="bg-gray-50">
+                    <tr className="border-b">
                       <td className="p-2">List Price:</td>
-                      <td className="p-2 text-right font-semibold text-blue-900">{fmtPhp(selectedUnit.ListPrice)}</td>
+                      <td className="p-2 text-right font-semibold text-blue-900">
+                        {fmtPhp(selectedUnit.ListPrice)}
+                      </td>
                     </tr>
-                    <tr>
+
+                    <tr className="border-b">
                       <td className="p-2">Special Discount:</td>
                       <td className="p-2 text-right text-red-600 font-semibold">{discountPct}%</td>
                     </tr>
-                    <tr className="bg-gray-50 font-bold text-blue-900">
+
+                    <tr className="border-b bg-gray-50 font-semibold text-blue-900">
                       <td className="p-2">Total Contract Price:</td>
                       <td className="p-2 text-right">{fmtPhp(TCP)}</td>
                     </tr>
-                    <tr>
+
+                    <tr className="border-b">
                       <td className="p-2">Reservation Fee:</td>
                       <td className="p-2 text-right">{fmtPhp(reservationFee)}</td>
                     </tr>
-                    <tr className="bg-gray-50">
-                      <td className="p-2">Net Downpayment ({downPct}%):</td>
+
+                    <tr className="border-b bg-gray-50">
+                      <td className="p-2">
+                        Downpayment{" "}
+                        <span className="text-xs text-muted-foreground">({downPct}%)</span>:
+                      </td>
                       <td className="p-2 text-right">{fmtPhp(dpAmount)}</td>
                     </tr>
-                    <tr className="bg-yellow-100 font-bold text-yellow-900">
-                      <td className="p-2">Net Downpayment Payable in:</td>
-                      <td className="p-2 text-right">{monthsToPay} Mos. ({fmtPhp(dpMonthly)})</td>
+
+                    {/* Highlight row */}
+                    <tr className="border-b">
+                      <td className="p-0" colSpan={2}>
+                        <div className="flex items-stretch justify-between rounded-md overflow-hidden">
+                          <div className="flex-1 bg-yellow-100 p-2 text-[13px]">
+                            <div className="font-semibold text-yellow-900">
+                              Net Downpayment Payable in:
+                            </div>
+                            <div className="text-[11px] text-yellow-800">
+                              *will start after a month of the reservation date
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 bg-yellow-100 px-3">
+                            <span className="text-[12px] bg-yellow-200 px-2 py-1 rounded font-medium">
+                              {monthsToPay} Mos.
+                            </span>
+                            <span className="text-2xl font-extrabold text-yellow-900">
+                              {fmtPhp(dpMonthly)}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
                     </tr>
-                    <tr>
-                      <td className="p-2">Closing Fee ({closingFeePct}%):</td>
+
+                    <tr className="border-b">
+                      <td className="p-2">
+                        Closing Fee{" "}
+                        <span className="text-xs text-muted-foreground">({closingFeePct}%)</span>:
+                      </td>
                       <td className="p-2 text-right">{fmtPhp(closingFee)}</td>
                     </tr>
-                    <tr className="bg-gray-50 font-semibold">
+                    <tr>
+                      <td className="px-2 pb-3 text-[11px] text-muted-foreground" colSpan={2}>
+                        *Covers Title fees &amp; other government fees • *Payable upon turnover • *Can be
+                        included in bank loan
+                      </td>
+                    </tr>
+
+                    <tr className="border-t bg-gray-50 font-semibold">
                       <td className="p-2">Balance Bank Financing:</td>
                       <td className="p-2 text-right text-blue-900">{fmtPhp(bankBalance)}</td>
                     </tr>
                   </tbody>
                 </table>
 
-                {/* Bank Financing */}
-                <div className="mt-4 border-t pt-2">
-                  <p className="font-semibold text-blue-900">Bank Financing (indicative)</p>
-                  <table className="w-full text-sm border-collapse">
-                    <tbody>
-                      <tr>
-                        <td className="p-2">20 yrs @ {rate20yr}%</td>
-                        <td className="p-2 text-right font-semibold text-blue-900">{fmtPhp(monthly20)}</td>
-                      </tr>
-                      <tr className="bg-gray-50">
-                        <td className="p-2">15 yrs @ {rate15yr}%</td>
-                        <td className="p-2 text-right font-semibold text-blue-900">{fmtPhp(monthly15)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                {/* Bank Financing (indicative) */}
+                <div className="mt-4 border-t pt-3">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-blue-900">Bank Financing (indicative)</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      *Subject to bank’s prevailing rate at time of loan
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 mt-2">
+                    <div className="rounded-lg border p-3">
+                      <div className="text-xs text-muted-foreground">20 years @ {rate20yr}%</div>
+                      <div className="text-right font-semibold text-blue-900">{fmtPhp(monthly20)}</div>
+                    </div>
+                    <div className="rounded-lg border p-3">
+                      <div className="text-xs text-muted-foreground">15 years @ {rate15yr}%</div>
+                      <div className="text-right font-semibold text-blue-900">{fmtPhp(monthly15)}</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -336,9 +522,92 @@ export default function ComputationPage() {
             </div>
           </div>
         ) : (
-          <p className="text-gray-600 mt-8">Select a unit to see the computation.</p>
+          !loading && !loadError && (
+            <p className="text-gray-600 mt-8">Select a unit to see the computation.</p>
+          )
         )}
       </section>
+
+      {/* ——————————— Mobile Adjustments: Floating Action Button ——————————— */}
+      {mounted && (
+        <button
+          onClick={() => setIsAdjustOpen(true)}
+          className="md:hidden fixed bottom-5 right-5 z-50 rounded-full shadow-lg bg-blue-600 text-white px-4 py-3"
+          aria-label="Open adjustments"
+        >
+          Adjust
+        </button>
+      )}
+
+      {/* ——————————— Mobile Adjustments: Bottom Sheet ——————————— */}
+      {isAdjustOpen && (
+        <div className="md:hidden fixed inset-0 z-[60]">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setIsAdjustOpen(false)} />
+          <div className="absolute left-0 right-0 bottom-0 max-h-[85vh] bg-white rounded-t-2xl shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-3 border-b rounded-t-2xl">
+              <div className="font-semibold">Adjustments</div>
+              <button
+                onClick={() => setIsAdjustOpen(false)}
+                className="rounded-lg border px-3 py-1 text-sm hover:bg-gray-50"
+              >
+                Done
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {[
+                  { key: "discount", label: "Special Discount %", value: discountPct, step: 0.1, onChange: setDiscountPct },
+                  { key: "down", label: "Downpayment %", value: downPct, step: 0.1, onChange: setDownPct },
+                  { key: "months", label: "Months to Pay", value: monthsToPay, step: 1, onChange: (n: number) => setMonthsToPay(Math.max(1, Math.floor(n))) },
+                  { key: "res", label: "Reservation Fee", value: reservationFee, step: 1000, onChange: (n: number) => setReservationFee(Math.max(0, Math.floor(n))) },
+                  { key: "closing", label: "Closing Fee %", value: closingFeePct, step: 0.1, onChange: setClosingFeePct },
+                ].map(({ key, label, value, step, onChange }) => (
+                  <label key={key} className="block text-xs">
+                    {label}
+                    <input
+                      type="number"
+                      step={step as number}
+                      value={Number.isFinite(value as number) ? (value as number) : 0}
+                      onChange={(e) => (onChange as any)(Number(e.target.value || 0))}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="mt-1 w-full px-2 py-2 border rounded"
+                    />
+                  </label>
+                ))}
+              </div>
+
+              <div className="pt-1">
+                <h3 className="font-semibold mb-2 text-blue-900 text-sm">Bank Rates</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-xs">
+                    15 years %
+                    <input
+                      type="number"
+                      step={0.1}
+                      value={rate15yr}
+                      onChange={(e) => setRate15yr(Number(e.target.value || 0))}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="mt-1 w-full px-2 py-2 border rounded"
+                    />
+                  </label>
+                  <label className="block text-xs">
+                    20 years %
+                    <input
+                      type="number"
+                      step={0.1}
+                      value={rate20yr}
+                      onChange={(e) => setRate20yr(Number(e.target.value || 0))}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="mt-1 w-full px-2 py-2 border rounded"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
