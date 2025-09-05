@@ -1,6 +1,79 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { serverSupabase } from "@/lib/supabase/server";
+import RenderWidget from "@/components/home/RenderWidget";
+import HomeEditShellClient from "@/components/home/HomeEditShellClient";
 
-export default function HomePage() {
+export default async function HomePage() {
+  const supabase = await serverSupabase();
+  const cookieStore = await cookies();
+
+  // preview cookie you already use
+  const previewMode = cookieStore.get("preview_mode")?.value || "client";
+  const showAll = previewMode === "staff";
+
+  // who is viewing?
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  let role: "CLIENT" | "AGENT" | "MANAGER" | "ADMIN" | undefined;
+  if (session) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", session.user.id)
+      .single();
+    role = profile?.role as any;
+  }
+  const isStaff = role === "AGENT" || role === "MANAGER" || role === "ADMIN";
+  const canEdit = role === "MANAGER" || role === "ADMIN";
+
+  // everyone sees published widgets; staff can also see hidden ones if preview is "staff"
+  let qry = supabase
+    .from("homepage_widgets")
+    .select("*")
+    .order("order_index", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (!(isStaff && showAll)) {
+    qry = qry.eq("visible", true);
+  }
+
+  const { data: widgets, error } = await qry;
+
+  if (error) {
+    return (
+      <main className="mx-auto max-w-4xl p-6">
+        <div className="card p-6 border-red-200 bg-red-50 text-red-800">
+          Failed to load homepage: {error.message}
+        </div>
+      </main>
+    );
+  }
+
+  // If no configured widgets, show your original static homepage (fallback)
+  if (!widgets || widgets.length === 0) {
+    return <FallbackHome />;
+  }
+
+  // Otherwise, render widgets + (if manager/admin) the inline edit shell
+  return (
+    <main>
+      <HomeEditShellClient
+        canEdit={canEdit}
+        initialWidgets={widgets as any}
+      >
+        {widgets.map((w) => (
+          <RenderWidget key={w.id} widget={w as any} />
+        ))}
+      </HomeEditShellClient>
+    </main>
+  );
+}
+
+/* --- original static homepage kept intact as fallback --- */
+function FallbackHome() {
   return (
     <main>
       {/* HERO */}
@@ -33,7 +106,6 @@ export default function HomePage() {
             </div>
 
             <div className="card p-0 overflow-hidden">
-              {/* Simple visual mock (replace with a real image later) */}
               <div className="aspect-[16/10] bg-gradient-to-br from-[color:var(--primary)]/10 to-[color:var(--primary)]/30 grid place-items-center">
                 <div className="rounded-xl border border-border bg-white/70 backdrop-blur p-4 shadow-sm text-center">
                   <div className="text-sm text-muted-foreground">Project Spotlight</div>
@@ -70,7 +142,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* FEATURED PROJECTS (static placeholders; link to your pages) */}
+      {/* FEATURED PROJECTS */}
       <section className="section pt-0">
         <div className="mx-auto max-w-7xl">
           <header className="flex items-end justify-between mb-4">
@@ -123,7 +195,6 @@ export default function HomePage() {
   );
 }
 
-/* --- tiny presentational helpers --- */
 function Feature({ title, desc }: { title: string; desc: string }) {
   return (
     <div className="card p-6">
@@ -133,15 +204,7 @@ function Feature({ title, desc }: { title: string; desc: string }) {
   );
 }
 
-function ProjectCard({
-  title,
-  href,
-  tags,
-}: {
-  title: string;
-  href: string;
-  tags: string[];
-}) {
+function ProjectCard({ title, href, tags }: { title: string; href: string; tags: string[] }) {
   return (
     <Link href={href} className="card p-0 overflow-hidden group">
       <div className="aspect-[16/10] bg-muted/50 grid place-items-center">

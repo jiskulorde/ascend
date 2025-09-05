@@ -5,7 +5,8 @@ export default async function Navbar() {
   const supabase = await serverSupabase();
   const { data: { session } } = await supabase.auth.getSession();
 
-  let role: "CLIENT" | "AGENT" | "MANAGER" | undefined;
+  let role: "CLIENT" | "AGENT" | "MANAGER" | "ADMIN" | undefined;
+
   if (session) {
     const { data: profile } = await supabase
       .from("profiles")
