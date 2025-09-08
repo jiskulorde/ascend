@@ -74,7 +74,6 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
       { kind: "link", label: "Availability", href: "/availability" },
       { kind: "link", label: "Compare", href: "/compare" },
       { kind: "link", label: "Summary", href: "/summary" },
-      { kind: "link", label: "Looker", href: "/looker" },
     ],
   };
 
@@ -101,7 +100,6 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
   // Agent
   const agentLinks: NavLink[] = [
     AVAILABILITY_DROPDOWN,
-    { kind: "link", label: "Clients", href: "/clients" },
     { kind: "link", label: "Projects", href: "/projects" },
     { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
   ];

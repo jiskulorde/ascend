@@ -75,7 +75,7 @@ export default function PropertySummaryPage() {
   const [error, setError] = useState<string | null>(null);
 
   // filters / controls
-  const [minFloor, setMinFloor] = useState<number>(12);
+  const [minFloor, setMinFloor] = useState<number>(0);
   const [includeOnHold, setIncludeOnHold] = useState<boolean>(false);
   const [selectedCity, setSelectedCity] = useState<string>("");      // optional filter
   const [selectedType, setSelectedType] = useState<string>("");      // optional filter
