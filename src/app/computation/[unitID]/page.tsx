@@ -538,13 +538,13 @@ export default function ComputationPage() {
                     <tr className="border-b">
                       <td className="p-0" colSpan={2}>
                         <div className="flex items-stretch justify-between rounded-md overflow-hidden">
-                          <div className="flex-1 bg-yellow-100 p-2 text-[13px]">
+                          <div className="flex-1 bg-blue-100 p-2 text-[13px]">
                             <div className="font-semibold text-yellow-900">Net Downpayment Payable in:</div>
                             <div className="text-[11px] text-yellow-800">*will start after a month of the reservation date</div>
                           </div>
-                          <div className="flex items-center gap-3 bg-yellow-100 px-3">
-                            <span className="text-[12px] bg-yellow-200 px-2 py-1 rounded font-medium">{monthsToPay} Mos.</span>
-                            <span className="text-2xl font-extrabold text-yellow-900">{fmtPhp(dpMonthly)}</span>
+                          <div className="flex items-center gap-3 bg-blue-100 px-3">
+                            <span className="text-[12px] bg-blue-200 px-2 py-1 rounded font-medium">{monthsToPay} Mos.</span>
+                            <span className="text-xl font-extrabold text-yellow-900">{fmtPhp(dpMonthly)}</span>
                           </div>
                         </div>
                       </td>
@@ -558,8 +558,8 @@ export default function ComputationPage() {
                           <td className="p-2 text-right font-semibold text-blue-900">{fmtPhp(rtoRate)}</td>
                         </tr>
                         <tr className="border-b bg-yellow-50">
-                          <td className="p-2 font-semibold">TOTAL Down Payment + Rent to Own <span className="text-xs text-muted-foreground">(per month)</span>:</td>
-                          <td className="p-2 text-right text-yellow-900 font-extrabold text-xl">{fmtPhp(rtoTotalMonthly)}</td>
+                          <td className="p-2 font-semibold">TOTAL Down Payment + Rent to Own <span className="text-sm text-muted-foreground">(per month)</span>:</td>
+                          <td className="p-2 text-right flex-1 bg-yellow-100 px-3 justify-between rounded-md text-yellow-900 font-extrabold text-2xl">{fmtPhp(rtoTotalMonthly)}</td>
                         </tr>
 
                         {/* Cash-out to Move-in panel as a table row (valid HTML) */}
