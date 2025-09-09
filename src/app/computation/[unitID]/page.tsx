@@ -12,7 +12,6 @@ type UnitRow = {
   address: string;
   tower_code: string;
   tower_name: string;
-
   Property: string;
   BuildingUnit: string;
   Tower: string;
@@ -25,7 +24,6 @@ type UnitRow = {
   RFODate: string;
   ListPrice: number;
   PerSQM: number;
-
   unit_id: string;
 };
 
@@ -79,6 +77,8 @@ export default function ComputationPage() {
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [floatPanel, setFloatPanel] = useState(false);
   const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null);
+
+  // The sheet we render/export
   const sheetRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => setMounted(true), []);
@@ -140,9 +140,11 @@ export default function ComputationPage() {
   // move-in defaults (can expose later as editable)
   const [rtoAdvanceRentMonths] = useState(1);
   const [rtoSecurityDepositMonths] = useState(2);
-  const [rtoUtilityDepositMonths] = useState(1);
   const [rtoAdvanceDpMonths] = useState(4);
   const [turnoverFees] = useState(25_000);
+
+  // Fixed utility deposit for all RTO computations
+  const RTO_UTILITY_DEPOSIT_PHP = 12_500 as const;
 
   useEffect(() => {
     let cancelled = false;
@@ -173,7 +175,7 @@ export default function ComputationPage() {
             setRtoLoading(false);
             return;
           }
-        } catch {/* try next candidate */}
+        } catch { /* try next candidate */ }
       }
       if (!cancelled) { setRto({ eligible: false }); setRtoLoading(false); }
     }
@@ -198,7 +200,10 @@ export default function ComputationPage() {
   const fmtPhp = (n: number) =>
     new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 2 }).format(n);
 
-  const TCP = (selectedUnit?.ListPrice || 0) * (1 - discountPct / 100);
+  const listPrice = selectedUnit?.ListPrice ?? 0;
+  const TCP = listPrice * (1 - discountPct / 100);
+  const discountSavings = Math.max(0, listPrice - TCP);
+
   const dpAmount = (TCP * downPct) / 100;
   const netDp = Math.max(0, dpAmount - reservationFee);
   const dpMonthly = monthsToPay > 0 ? netDp / monthsToPay : 0;
@@ -223,36 +228,65 @@ export default function ComputationPage() {
   const rtoRate = rto.monthly || 0;
   const rtoTotalMonthly = dpMonthly + rtoRate;
   const rtoCashOutMoveIn =
-    rtoRate * (rtoAdvanceRentMonths + rtoSecurityDepositMonths + rtoUtilityDepositMonths) +
+    rtoRate * (rtoAdvanceRentMonths + rtoSecurityDepositMonths) +
+    RTO_UTILITY_DEPOSIT_PHP +
     dpMonthly * rtoAdvanceDpMonths;
 
-  // ---- capture helpers for PNG/PDF ----
-  const computeCaptureSize = () => {
-    const node = sheetRef.current!;
-    const rect = node.getBoundingClientRect();
-    // Render at a consistent width (good for mobile & desktop), but never smaller than what’s visible
-    const targetW = Math.min(980, Math.max(760, rect.width));
-    const targetH = rect.height * (targetW / rect.width);
-    return { targetW, targetH };
-  };
+  // ---- compact spacing helpers ----
+  const td = "py-1.5 px-2";     // consistent compact cell padding
+  const tdTight = "py-1 px-2";  // even tighter for small labels
+  const sectionPad = "px-3 py-2";
 
-  // downloads
-  const safeFileStem = (s: string) => (s || "computation").replace(/[^\w\-]+/g, "_");
+  // ---- robust capture for PNG/PDF (crisp & consistent) ----
+  // We temporarily set a fixed export width so downloads look identical across devices.
+  const EXPORT_WIDTH = 980; // px (nice on A4 after scaling, readable on phones)
+  const withSheetFrozen = async <T,>(work: () => Promise<T>): Promise<T> => {
+    if (!sheetRef.current) return work();
+    const node = sheetRef.current;
+    const prev = {
+      width: node.style.width,
+      maxWidth: node.style.maxWidth,
+      boxShadow: node.style.boxShadow,
+      transform: node.style.transform,
+    };
+    node.style.width = `${EXPORT_WIDTH}px`;
+    node.style.maxWidth = "none";
+    node.style.boxShadow = "none";        // avoids shadow cut-offs
+    node.style.transform = "none";        // avoid scaled parent issues
+    document.body.classList.add("exporting"); // if you want to target global tweaks
+    // give the browser a tick to reflow
+    await new Promise((r) => requestAnimationFrame(() => r(null as any)));
+    try {
+      return await work();
+    } finally {
+      node.style.width = prev.width;
+      node.style.maxWidth = prev.maxWidth;
+      node.style.boxShadow = prev.boxShadow;
+      node.style.transform = prev.transform;
+      document.body.classList.remove("exporting");
+    }
+  };
 
   const downloadPNG = async () => {
     if (!sheetRef.current) return;
     const { toPng } = await import("html-to-image");
-    const { targetW, targetH } = computeCaptureSize();
-    const url = await toPng(sheetRef.current, {
-      cacheBust: true,
-      pixelRatio: 2,
-      width: Math.round(targetW),
-      height: Math.round(targetH),
+    await withSheetFrozen(async () => {
+      const node = sheetRef.current!;
+      const width = EXPORT_WIDTH;
+      const height = Math.max(node.scrollHeight, node.offsetHeight);
+      const url = await toPng(node, {
+        cacheBust: true,
+        backgroundColor: "#ffffff",
+        pixelRatio: 3,              // crisp
+        width,
+        height,
+        style: { transform: "none" }
+      });
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safeFileStem(selectedUnitId)}.png`;
+      a.click();
     });
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${safeFileStem(selectedUnitId)}.png`;
-    a.click();
   };
 
   const downloadPDF = async () => {
@@ -260,31 +294,37 @@ export default function ComputationPage() {
     const { toPng } = await import("html-to-image");
     const { jsPDF } = await import("jspdf");
 
-    const { targetW, targetH } = computeCaptureSize();
-    const imgData = await toPng(sheetRef.current, {
-      cacheBust: true,
-      pixelRatio: 2,
-      width: Math.round(targetW),
-      height: Math.round(targetH),
+    await withSheetFrozen(async () => {
+      const node = sheetRef.current!;
+      const imgW = EXPORT_WIDTH;
+      const imgH = Math.max(node.scrollHeight, node.offsetHeight);
+      const imgData = await toPng(node, {
+        cacheBust: true,
+        backgroundColor: "#ffffff",
+        pixelRatio: 3,
+        width: imgW,
+        height: imgH,
+        style: { transform: "none" }
+      });
+
+      // A4 in points (jsPDF default, 72pt = 1in)
+      const pdf = new jsPDF({ orientation: imgW >= imgH ? "l" : "p", unit: "pt", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+
+      // Fit the whole image on a single page (no cropping)
+      const scale = Math.min(pageW / imgW, pageH / imgH);
+      const drawW = imgW * scale;
+      const drawH = imgH * scale;
+      const x = (pageW - drawW) / 2;
+      const y = (pageH - drawH) / 2;
+
+      pdf.addImage(imgData, "PNG", x, y, drawW, drawH);
+      pdf.save(`${safeFileStem(selectedUnitId)}.pdf`);
     });
-
-    const orientation = targetW >= targetH ? "l" : "p";
-    const pdf = new jsPDF({ orientation, unit: "pt", format: "a4" });
-
-    const pageW = pdf.internal.pageSize.getWidth();
-    const pageH = pdf.internal.pageSize.getHeight();
-
-    // Fit the whole image onto a single page (no cropping)
-    const scale = Math.min(pageW / targetW, pageH / targetH);
-    const drawW = targetW * scale;
-    const drawH = targetH * scale;
-    const x = (pageW - drawW) / 2;
-    const y = (pageH - drawH) / 2;
-
-    pdf.addImage(imgData, "PNG", x, y, drawW, drawH);
-    pdf.save(`${safeFileStem(selectedUnitId)}.pdf`);
   };
 
+  // Excel stays the same
   const downloadExcel = async () => {
     const XLSX = await import("xlsx");
     const u = selectedUnit!;
@@ -364,7 +404,7 @@ export default function ComputationPage() {
         <div
           onMouseDown={onDragStart}
           onTouchStart={onDragStart}
-          className="flex items-center justify-between gap-2 px-4 py-2 border-b rounded-t-2xl cursor-move select-none"
+          className="flex items-center justify-between gap-2 px-3 py-2 border-b rounded-t-2xl cursor-move select-none"
           title={floatPanel ? "Drag me" : "Click Float to undock"}
         >
           <div className="text-sm font-semibold text-blue-900">Adjustments</div>
@@ -376,7 +416,7 @@ export default function ComputationPage() {
           </div>
         </div>
 
-        <div className="p-4 space-y-3 text-sm">
+        <div className="p-3 space-y-3 text-sm">
           {adjustmentInputs.map(({ key, label, value, step, onChange }) => (
             <label key={key} className="block text-xs">
               {label}
@@ -392,9 +432,9 @@ export default function ComputationPage() {
           ))}
         </div>
 
-        <div className="px-4 py-3 border-t">
-          <h3 className="font-semibold mb-3 text-blue-900 text-sm">Bank Rates</h3>
-          <div className="space-y-3 text-sm">
+        <div className="px-3 py-2 border-t">
+          <h3 className="font-semibold mb-2 text-blue-900 text-sm">Bank Rates</h3>
+          <div className="space-y-2 text-sm">
             <label className="block text-xs">
               15 years %
               <input
@@ -424,7 +464,7 @@ export default function ComputationPage() {
       {/* Main */}
       <section className="flex-1 flex flex-col items-center p-4 md:pl-0 overflow-auto">
         {/* Unit picker + mode */}
-        <div className="bg-white rounded-xl p-4 shadow-sm border w-full max-w-[760px] sm:max-w-[860px] md:max-w-[980px] xl:max-w-[1100px] mb-4">
+        <div className="bg-white rounded-xl p-3 shadow-sm border w-full max-w-[760px] sm:max-w-[860px] md:max-w-[980px] xl:max-w-[1100px] mb-3">
           <p className="font-semibold mb-2 text-blue-900">Select a unit to compute</p>
           <Select
             instanceId="comp-unit-select"
@@ -440,7 +480,7 @@ export default function ComputationPage() {
             placeholder="Search unit…"
           />
 
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-2 flex items-center gap-2">
             <div className="inline-flex p-1 bg-white border rounded-xl">
               <button
                 className={`px-3 py-1 rounded-lg text-sm ${mode === "STANDARD" ? "bg-blue-600 text-white" : "hover:bg-gray-100"}`}
@@ -482,69 +522,93 @@ export default function ComputationPage() {
 
         {/* Sheet */}
         {selectedUnit ? (
-          <div className="w-full max-w-[760px] sm:max-w-[860px] md:max-w-[980px] xl:max-w-[1100px] flex flex-col items-center space-y-4">
+          <div className="w-full max-w-[760px] sm:max-w-[860px] md:max-w-[980px] xl:max-w-[1100px] flex flex-col items-center space-y-3">
             <div ref={sheetRef} className="bg-white rounded-xl shadow-md w-full border overflow-hidden">
               {/* Top banner for RTO */}
               {mode === "RTO" && (
-                <div className="px-5 py-2 bg-red-600 text-white font-extrabold tracking-wide text-center">
+                <div className="px-3 py-1 bg-red-600 text-white font-extrabold tracking-wide text-center">
                   RENT TO OWN — COMPUTATION
                 </div>
               )}
 
               {/* Header */}
-              <div className="bg-blue-900 text-white p-6">
-                <h1 className="text-2xl font-bold">{selectedUnit.property_name}</h1>
-                <p className="opacity-90">{selectedUnit.tower_name || selectedUnit.tower_code}</p>
-                <p className="mt-1 text-blue-100">{selectedUnit.address || selectedUnit.city}</p>
+              <div className="bg-blue-900 text-white py-3">
+                <h1 className="px-3 text-xl md:text-2xl font-bold">{selectedUnit.property_name}</h1>
+                <p className="px-3 mt-0.5 text-blue-100 text-[13px]">{selectedUnit.address || selectedUnit.city}</p>
               </div>
 
               {/* Validity */}
-              <div className="px-5 py-2 border-b">
-                <span className="text-[13px] font-semibold text-red-600">{validityText}</span>
+              <div className="px-3 py-1.5 border-b">
+                <span className="text-[12px] font-semibold text-red-600">{validityText}</span>
               </div>
 
               {/* Unit meta */}
-              <div className="px-5 py-3 border-b text-[13px] grid sm:grid-cols-3 gap-2 bg-[#fcfdff]">
+              <div className="px-3 py-1.5 border-b text-[12.5px] grid sm:grid-cols-3 gap-2 bg-[#fcfdff]">
                 <div>Turnover date: <span className="font-semibold text-blue-900">{selectedUnit.RFODate || "TBA"}</span></div>
                 <div>Building | Unit type: <span className="font-semibold text-blue-900">{selectedUnit.BuildingUnit} | {selectedUnit.Type}</span></div>
                 <div>Total area: <span className="font-semibold text-blue-900">{selectedUnit.GrossAreaSQM} sqm</span></div>
               </div>
 
               {/* Table */}
-              <div className="p-5">
+              <div className="p-0">
                 <table className="w-full text-[13px] border-collapse">
                   <tbody>
-                    <tr className="border-b">
-                      <td className="p-2">List Price:</td>
-                      <td className="p-2 text-right font-semibold text-blue-900">{fmtPhp(selectedUnit.ListPrice)}</td>
+                    <tr className="py-0.5 border-b">
+                      <td className={td}>List Price:</td>
+                      <td className={`${td} text-right font-semibold text-blue-900`}>{fmtPhp(selectedUnit.ListPrice)}</td>
                     </tr>
-                    <tr className="border-b">
-                      <td className="p-2">Special Discount:</td>
-                      <td className="p-2 text-right text-red-600 font-semibold">{discountPct}%</td>
+                    
+                    {/* Special Discount highlight */}
+                    {discountPct > 0 ? (
+  <tr className="py-0.5 border-b">
+    <td className="p-0" colSpan={2}>
+      <div className="flex items-stretch justify-between rounded-md overflow-hidden ">
+        <div className="p-0">
+          <div className=" text-red-700">Special Discount</div>
+        </div>
+        <div className="flex items-center gap-1 px-1">
+          <span className="text-[12px] text-red-700 px-2 py-1 rounded font-extrabold">
+            {discountPct}%
+          </span>
+          <span className="text-sm text-red-700">
+            −{fmtPhp(discountSavings)}
+          </span>
+        </div>
+      </div>
+    </td>
+  </tr>
+) : (
+                    
+                      <tr className="py-0.5 border-b">
+                        <td className={tdTight}>Special Discount:</td>
+                        <td className={`${tdTight} text-right text-slate-600 font-semibold`}>{discountPct}%</td>
+                      </tr>
+                    )}
+
+                    <tr className="py-0.5 border-b bg-gray-50 font-semibold text-blue-900">
+                      <td className={td}>Total Contract Price:</td>
+                      <td className={`${td} text-right text-[18px]`}>{fmtPhp(TCP)}</td>
                     </tr>
-                    <tr className="border-b bg-gray-50 font-semibold text-blue-900">
-                      <td className="p-2">Total Contract Price:</td>
-                      <td className="p-2 text-right">{fmtPhp(TCP)}</td>
+                    <tr className="py-0.5 border-b">
+                      <td className={td}>Reservation Fee:</td>
+                      <td className={`${td} text-right`}>{fmtPhp(reservationFee)}</td>
                     </tr>
-                    <tr className="border-b">
-                      <td className="p-2">Reservation Fee:</td>
-                      <td className="p-2 text-right">{fmtPhp(reservationFee)}</td>
+                    <tr className="py-0.5 border-b bg-gray-50">
+                      <td className={td}>Downpayment <span className="text-xs text-muted-foreground">({downPct}%)</span>:</td>
+                      <td className={`${td} text-right`}>{fmtPhp(dpAmount)}</td>
                     </tr>
-                    <tr className="border-b bg-gray-50">
-                      <td className="p-2">Downpayment <span className="text-xs text-muted-foreground">({downPct}%)</span>:</td>
-                      <td className="p-2 text-right">{fmtPhp(dpAmount)}</td>
-                    </tr>
+
                     {/* Net DP highlight */}
-                    <tr className="border-b">
+                    <tr className="py-0.5 border-b">
                       <td className="p-0" colSpan={2}>
                         <div className="flex items-stretch justify-between rounded-md overflow-hidden">
                           <div className="flex-1 bg-blue-100 p-2 text-[13px]">
-                            <div className="font-semibold text-yellow-900">Net Downpayment Payable in:</div>
-                            <div className="text-[11px] text-yellow-800">*will start after a month of the reservation date</div>
+                            <div className="font-semibold text-blue-900">Net Downpayment Payable in:</div>
+                            <div className="text-[11px] text-blue-800">*starts one month after reservation date</div>
                           </div>
-                          <div className="flex items-center gap-3 bg-blue-100 px-3">
+                          <div className="flex items-center gap-2 bg-blue-100 px-3">
                             <span className="text-[12px] bg-blue-200 px-2 py-1 rounded font-medium">{monthsToPay} Mos.</span>
-                            <span className="text-xl font-extrabold text-yellow-900">{fmtPhp(dpMonthly)}</span>
+                            <span className="text-xl font-extrabold text-blue-900">{fmtPhp(dpMonthly)}</span>
                           </div>
                         </div>
                       </td>
@@ -553,49 +617,49 @@ export default function ComputationPage() {
                     {/* RTO rows inside table */}
                     {mode === "RTO" && (
                       <>
-                        <tr className="border-b">
-                          <td className="p-2">Rent To Own Rate: <span className="text-xs text-muted-foreground">(incl. assoc. dues)</span></td>
-                          <td className="p-2 text-right font-semibold text-blue-900">{fmtPhp(rtoRate)}</td>
+                        <tr className="py-0.5 border-b">
+                          <td className={td}>Rent To Own Rate: <span className="text-xs text-muted-foreground">(incl. assoc. dues)</span></td>
+                          <td className={`${td} text-right font-semibold text-[18px] text-blue-900`}>{fmtPhp(rtoRate)}</td>
                         </tr>
-                        <tr className="border-b bg-yellow-50">
-                          <td className="p-2 font-semibold">TOTAL Down Payment + Rent to Own <span className="text-sm text-muted-foreground">(per month)</span>:</td>
-                          <td className="p-2 text-right flex-1 bg-yellow-100 px-3 justify-between rounded-md text-yellow-900 font-extrabold text-2xl">{fmtPhp(rtoTotalMonthly)}</td>
+                        <tr className="py-0.5 border-b bg-yellow-50">
+                          <td className={`${td} font-semibold`}>TOTAL Down Payment + Rent to Own <span className="text-xs text-muted-foreground">(per month)</span>:</td>
+                          <td className={`${td} text-right bg-yellow-100 rounded-md text-yellow-900 font-extrabold text-2xl`}>{fmtPhp(rtoTotalMonthly)}</td>
                         </tr>
 
-                        {/* Cash-out to Move-in panel as a table row (valid HTML) */}
+                        {/* Cash-out to Move-in */}
                         <tr>
                           <td colSpan={2} className="p-0">
-                            <div className="mt-4 rounded-lg border overflow-hidden">
-                              <div className="px-3 py-2 bg-slate-50 font-medium">CASH OUT TO MOVE-IN (One-time)</div>
-                              <div className="px-3 py-2 flex items-center justify-between text-sm">
+                            <div className="mt-2 rounded-lg border overflow-hidden">
+                              <div className="px-2 py-1 bg-slate-200 font-medium">CASH OUT TO MOVE-IN (One-time)</div>
+                              <div className="px-3 py-1 flex items-center justify-between text-sm">
                                 <span>1 Month Advance Rent</span>
-                                <b>{fmtPhp(rtoRate * rtoAdvanceRentMonths)}</b>
+                                <span>{fmtPhp(rtoRate * rtoAdvanceRentMonths)}</span>
                               </div>
-                              <div className="px-3 py-2 flex items-center justify-between text-sm">
+                              <div className="px-3 py-1 flex items-center justify-between text-sm">
                                 <span>2 Months Security Deposit</span>
-                                <b>{fmtPhp(rtoRate * rtoSecurityDepositMonths)}</b>
+                                <span>{fmtPhp(rtoRate * rtoSecurityDepositMonths)}</span>
                               </div>
-                              <div className="px-3 py-2 flex items-center justify-between text-sm">
+                              <div className="px-3 py-1 flex items-center justify-between text-sm">
                                 <span>Utility Bill Deposit</span>
-                                <b>{fmtPhp(rtoRate * rtoUtilityDepositMonths)}</b>
+                                <span>{fmtPhp(RTO_UTILITY_DEPOSIT_PHP)}</span>
                               </div>
-                              <div className="px-3 py-2 flex items-center justify-between text-sm">
+                              <div className="px-3 py-1 flex items-center justify-between text-sm">
                                 <span>Down Payment (Advance {rtoAdvanceDpMonths} mos)</span>
-                                <b>{fmtPhp(dpMonthly * rtoAdvanceDpMonths)}</b>
+                                <span>{fmtPhp(dpMonthly * rtoAdvanceDpMonths)}</span>
                               </div>
-                              <div className="px-3 py-2 flex items-center justify-between bg-yellow-50">
-                                <span className="font-semibold">Total Cash-Out</span>
-                                <b className="text-yellow-900">{fmtPhp(rtoCashOutMoveIn)}</b>
+                              <div className="px-3 py-1 flex items-center justify-between bg-yellow-50">
+                                <span className="font-semibold text-[16px]">Total Cash-Out</span>
+                                <b className="text-yellow-900 text-[16px]">{fmtPhp(rtoCashOutMoveIn)}</b>
                               </div>
                             </div>
                           </td>
                         </tr>
 
-                        {/* Due upon Turnover panel as a table row */}
+                        {/* Due upon Turnover */}
                         <tr>
                           <td colSpan={2} className="p-0">
-                            <div className="mt-4 rounded-lg border overflow-hidden">
-                              <div className="px-3 py-2 bg-slate-50 font-medium">DUE UPON TURNOVER (after {monthsToPay} months)</div>
+                            <div className="mt-2 rounded-lg border overflow-hidden">
+                              <div className="px-3 py-2 bg-slate-200 font-medium">DUE UPON TURNOVER (after {monthsToPay} months)</div>
                               <div className="px-3 py-2 flex items-center justify-between text-sm">
                                 <span>Closing Fees <span className="text-xs text-muted-foreground">({closingFeePct}%)</span></span>
                                 <b>{fmtPhp(closingFee)}</b>
@@ -610,35 +674,42 @@ export default function ComputationPage() {
                       </>
                     )}
 
-                    {/* Standard closing + balance rows (shown for both modes) */}
-                    <tr className="border-b">
-                      <td className="p-2">Closing Fee <span className="text-xs text-muted-foreground">({closingFeePct}%)</span>:</td>
-                      <td className="p-2 text-right">{fmtPhp(closingFee)}</td>
-                    </tr>
-                    <tr>
-                      <td className="px-2 pb-3 text-[11px] text-muted-foreground" colSpan={2}>
-                        *Covers Title fees &amp; other government fees • *Payable upon turnover • *Can be included in bank loan
-                      </td>
-                    </tr>
+                    {/* Standard closing + balance rows (only show Closing Fee here if NOT in RTO) */}
+                    {mode !== "RTO" && (
+                      <>
+                        <tr className="border-b">
+                          <td className={td}>
+                            Closing Fee <span className="text-xs text-muted-foreground">({closingFeePct}%)</span>:
+                          </td>
+                          <td className={`${td} text-right`}>{fmtPhp(closingFee)}</td>
+                        </tr>
+                        <tr>
+                          <td className="px-4 pb-3 text-[11px] text-muted-foreground" colSpan={2}>
+                            *Covers Title fees &amp; other government fees • *Payable upon turnover • *Can be included in bank loan
+                          </td>
+                        </tr>
+                      </>
+                    )}
+
                     <tr className="border-t bg-gray-50 font-semibold">
-                      <td className="p-2">Balance Bank Financing:</td>
-                      <td className="p-2 text-right text-blue-900">{fmtPhp(bankBalance)}</td>
+                      <td className={td}>Balance Bank Financing:</td>
+                      <td className={`${td} text-right text-blue-900`}>{fmtPhp(bankBalance)}</td>
                     </tr>
                   </tbody>
                 </table>
 
                 {/* Bank Financing */}
-                <div className="mt-4 border-t pt-3">
+                <div className="mt-4 border-t pt-2">
                   <div className="flex items-center justify-between">
-                    <p className="font-semibold text-blue-900">Bank Financing (indicative)</p>
+                    <p className="px-2 font-semibold text-blue-900">Bank Financing</p>
                     <p className="text-[11px] text-muted-foreground">*Subject to bank’s prevailing rate at time of loan</p>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 mt-2">
-                    <div className="rounded-lg border p-3">
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div className="rounded-lg border p-2">
                       <div className="text-xs text-muted-foreground">20 years @ {rate20yr}%</div>
                       <div className="text-right font-semibold text-blue-900">{fmtPhp(monthly20)}</div>
                     </div>
-                    <div className="rounded-lg border p-3">
+                    <div className="rounded-lg border p-2">
                       <div className="text-xs text-muted-foreground">15 years @ {rate15yr}%</div>
                       <div className="text-right font-semibold text-blue-900">{fmtPhp(monthly15)}</div>
                     </div>
@@ -648,7 +719,7 @@ export default function ComputationPage() {
             </div>
 
             {/* Actions */}
-            <div className="flex gap-3 mt-2">
+            <div className="flex gap-2 mt-2">
               <button onClick={() => router.back()} className="px-4 py-2 border rounded-lg">← Back</button>
               <button onClick={downloadPNG} className="px-4 py-2 bg-blue-600 text-white rounded-lg">PNG</button>
               <button onClick={downloadPDF} className="px-4 py-2 bg-green-600 text-white rounded-lg">PDF</button>
@@ -738,3 +809,6 @@ export default function ComputationPage() {
     </main>
   );
 }
+
+// ---- utilities ----
+const safeFileStem = (s: string) => (s || "computation").replace(/[^\w\-]+/g, "_");
