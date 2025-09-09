@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Range } from "react-range";
 import { makeUnitId } from "@/lib/unit-id";
 
 /** Matches your enriched /api/availability shape */
@@ -22,13 +23,13 @@ type UnitRow = {
   Status: string;         // e.g. "Avail.", "OnHold"
   Type: string;           // e.g. "1BR"
   GrossAreaSQM: number;
-  Amenities: string;
+  Amenities: string;      // e.g. "Front", "Rear"
   Facing: string;
   RFODate: string;
   ListPrice: number;
   PerSQM: number;
 
-  unit_id?: string; // canonical id if API includes it
+  unit_id?: string;       // canonical id if API includes it
 };
 
 type SummaryItem = {
@@ -48,15 +49,10 @@ const TYPE_ORDER = ["STUDIO", "1BR", "2BR", "3BR", "4BR", "LOFT"];
 /** best effort floor parsing from a variety of formats */
 function parseFloorNumber(floor: string): number {
   if (!floor) return 0;
-  // If pure number like "12"
   const n = Number(floor);
   if (Number.isFinite(n)) return n;
-
-  // Try to get the *last* number in the string e.g. "AGP-00A-12" -> 12
   const m = floor.match(/(\d+)(?!.*\d)/);
   if (m) return Number(m[1]);
-
-  // handle PH, GF etc as 0
   return 0;
 }
 
@@ -77,9 +73,11 @@ export default function PropertySummaryPage() {
   // filters / controls
   const [minFloor, setMinFloor] = useState<number>(0);
   const [includeOnHold, setIncludeOnHold] = useState<boolean>(false);
-  const [selectedCity, setSelectedCity] = useState<string>("");      // optional filter
-  const [selectedType, setSelectedType] = useState<string>("");      // optional filter
-  const [q, setQ] = useState<string>("");                            // quick search by project/tower
+  const [selectedCity, setSelectedCity] = useState<string>("");           // smart
+  const [selectedType, setSelectedType] = useState<string>("");           // smart
+  const [selectedAmenities, setSelectedAmenities] = useState<string>(""); // smart
+  const [sizeRange, setSizeRange] = useState<[number, number]>([0, 0]);   // smart (sqm)
+  const [q, setQ] = useState<string>("");                                 // quick search
 
   // quick compute (global assumptions for sample)
   const [discountPct, setDiscountPct] = useState<number>(0);
@@ -116,46 +114,130 @@ export default function PropertySummaryPage() {
     })();
   }, []);
 
-  const allCities = useMemo(() => {
-    return Array.from(new Set(rows.map(r => r.city).filter(Boolean))).sort();
-  }, [rows]);
+  // ---- SMART FILTER SOURCE SETS ---------------------------------------------
 
-  const allTypes = useMemo(() => {
-    return Array.from(new Set(rows.map(r => r.Type).filter(Boolean))).sort(
+  /** Applies only the "always-on" filters + other selected filters (except the one we’re building options for). */
+  const matchesBase = (r: UnitRow) => {
+    const st = r.Status.toLowerCase();
+    const statusOk = includeOnHold ? (st.startsWith("avail") || st.includes("hold")) : st.startsWith("avail");
+    if (!statusOk) return false;
+
+    if (parseFloorNumber(r.Floor) < minFloor) return false;
+
+    const ql = q.trim().toLowerCase();
+    if (
+      ql &&
+      !r.property_name.toLowerCase().includes(ql) &&
+      !(r.tower_name || "").toLowerCase().includes(ql) &&
+      !(r.tower_code || "").toLowerCase().includes(ql)
+    ) {
+      return false;
+    }
+    return true;
+  };
+
+  const availableCities = useMemo(() => {
+    const filtered = rows.filter((r) => {
+      if (!matchesBase(r)) return false;
+      if (selectedType && r.Type !== selectedType) return false;
+      if (selectedAmenities && r.Amenities !== selectedAmenities) return false;
+      return true;
+    });
+    return Array.from(new Set(filtered.map((r) => r.city).filter(Boolean))).sort();
+  }, [rows, includeOnHold, minFloor, q, selectedType, selectedAmenities]);
+
+  const availableTypes = useMemo(() => {
+    const filtered = rows.filter((r) => {
+      if (!matchesBase(r)) return false;
+      if (selectedCity && r.city !== selectedCity) return false;
+      if (selectedAmenities && r.Amenities !== selectedAmenities) return false;
+      return true;
+    });
+    return Array.from(new Set(filtered.map((r) => r.Type).filter(Boolean))).sort(
       (a, b) => TYPE_ORDER.indexOf(a) - TYPE_ORDER.indexOf(b)
     );
-  }, [rows]);
+  }, [rows, includeOnHold, minFloor, q, selectedCity, selectedAmenities]);
 
-  // filter rows for candidates
-  const candidateRows = useMemo(() => {
-    const ql = q.trim().toLowerCase();
-    return rows.filter(r => {
-      // status
-      const statusOk = includeOnHold
-        ? (r.Status.toLowerCase().startsWith("avail") || r.Status.toLowerCase().includes("hold"))
-        : r.Status.toLowerCase().startsWith("avail");
-
-      // floor
-      const floorNo = parseFloorNumber(r.Floor);
-      const floorOk = floorNo >= minFloor;
-
-      // city/type filters (if selected)
-      const cityOk = selectedCity ? r.city === selectedCity : true;
-      const typeOk = selectedType ? r.Type === selectedType : true;
-
-      // quick search on property/tower
-      const qOk = !ql
-        || r.property_name.toLowerCase().includes(ql)
-        || (r.tower_name || "").toLowerCase().includes(ql)
-        || (r.tower_code || "").toLowerCase().includes(ql);
-
-      return statusOk && floorOk && cityOk && typeOk && qOk;
+  const availableAmenities = useMemo(() => {
+    const filtered = rows.filter((r) => {
+      if (!matchesBase(r)) return false;
+      if (selectedCity && r.city !== selectedCity) return false;
+      if (selectedType && r.Type !== selectedType) return false;
+      return true;
     });
-  }, [rows, includeOnHold, minFloor, selectedCity, selectedType, q]);
+    return Array.from(new Set(filtered.map((r) => r.Amenities).filter(Boolean))).sort();
+  }, [rows, includeOnHold, minFloor, q, selectedCity, selectedType]);
+
+  // Size bounds depend on the remaining inventory (excluding size itself).
+  const sizeBounds = useMemo(() => {
+    const filtered = rows.filter((r) => {
+      if (!matchesBase(r)) return false;
+      if (selectedCity && r.city !== selectedCity) return false;
+      if (selectedType && r.Type !== selectedType) return false;
+      if (selectedAmenities && r.Amenities !== selectedAmenities) return false;
+      return true;
+    });
+    if (filtered.length === 0) return { min: 0, max: 0 };
+    const mins = Math.min(...filtered.map((r) => r.GrossAreaSQM || 0));
+    const maxs = Math.max(...filtered.map((r) => r.GrossAreaSQM || 0));
+    return { min: Math.floor(mins), max: Math.ceil(maxs) };
+  }, [rows, includeOnHold, minFloor, q, selectedCity, selectedType, selectedAmenities]);
+
+  const hasValidSizeBounds = sizeBounds.max > sizeBounds.min;
+
+  // Initialize / clamp sizeRange to the current bounds
+  useEffect(() => {
+    setSizeRange(([lo, hi]) => {
+      if (!hasValidSizeBounds) return [0, 0];
+      const nlo = Math.max(sizeBounds.min, Math.min(lo || sizeBounds.min, sizeBounds.max));
+      const nhi = Math.max(sizeBounds.min, Math.min(hi || sizeBounds.max, sizeBounds.max));
+      if (nlo > nhi) return [sizeBounds.min, sizeBounds.max];
+      return [nlo, nhi];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sizeBounds.min, sizeBounds.max, hasValidSizeBounds]);
+
+  // Auto-clear a selection if it’s no longer valid under other filters
+  useEffect(() => {
+    if (selectedCity && !availableCities.includes(selectedCity)) setSelectedCity("");
+  }, [availableCities, selectedCity]);
+  useEffect(() => {
+    if (selectedType && !availableTypes.includes(selectedType)) setSelectedType("");
+  }, [availableTypes, selectedType]);
+  useEffect(() => {
+    if (selectedAmenities && !availableAmenities.includes(selectedAmenities)) setSelectedAmenities("");
+  }, [availableAmenities, selectedAmenities]);
+
+  // ---- Final candidate set (applies ALL filters including size) -------------
+  const candidateRows = useMemo(() => {
+    return rows.filter((r) => {
+      if (!matchesBase(r)) return false;
+
+      if (selectedCity && r.city !== selectedCity) return false;
+      if (selectedType && r.Type !== selectedType) return false;
+      if (selectedAmenities && r.Amenities !== selectedAmenities) return false;
+
+      if (hasValidSizeBounds) {
+        const sqm = r.GrossAreaSQM || 0;
+        if (sqm < sizeRange[0] || sqm > sizeRange[1]) return false;
+      }
+
+      return true;
+    });
+  }, [
+    rows,
+    includeOnHold,
+    minFloor,
+    q,
+    selectedCity,
+    selectedType,
+    selectedAmenities,
+    sizeRange,
+    hasValidSizeBounds,
+  ]);
 
   // group to lowest price per property → tower → type
   const summary: SummaryItem[] = useMemo(() => {
-    // Map: property_code -> tower_code -> type -> min item
     const map = new Map<string, Map<string, Map<string, SummaryItem>>>();
 
     for (const u of candidateRows) {
@@ -170,11 +252,13 @@ export default function PropertySummaryPage() {
       const existingTypeMap = existingTowerMap.get(t) || new Map();
       existingTowerMap.set(t, existingTypeMap);
 
-      const unitId = u.unit_id || makeUnitId({
-        property_code: u.property_code,
-        tower_code: u.tower_code,
-        building_unit: u.BuildingUnit,
-      });
+      const unitId =
+        u.unit_id ||
+        makeUnitId({
+          property_code: u.property_code,
+          tower_code: u.tower_code,
+          building_unit: u.BuildingUnit,
+        });
 
       const candidate: SummaryItem = {
         property_code: u.property_code,
@@ -194,24 +278,22 @@ export default function PropertySummaryPage() {
       }
     }
 
-    // flatten to array sorted by property, tower, type order
     const out: SummaryItem[] = [];
-    const props = Array.from(map.values());
-    for (const [pCode, tMap] of map.entries()) {
-      for (const [tCode, yMap] of tMap.entries()) {
-        const items = Array.from(yMap.values()).sort(
-          (a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
+    for (const [, tMap] of map.entries()) {
+      for (const [, yMap] of tMap.entries()) {
+        out.push(
+          ...Array.from(yMap.values()).sort(
+            (a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type)
+          )
         );
-        out.push(...items);
       }
     }
 
-    // Sort: Property name asc → Tower code asc → Type order
     out.sort((a, b) => {
       if (a.property_name !== b.property_name) return a.property_name.localeCompare(b.property_name);
-      if ((a.tower_name || a.tower_code) !== (b.tower_name || b.tower_code)) {
-        return (a.tower_name || a.tower_code).localeCompare(b.tower_name || b.tower_code);
-      }
+      const at = a.tower_name || a.tower_code;
+      const bt = b.tower_name || b.tower_code;
+      if (at !== bt) return at.localeCompare(bt);
       return TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type);
     });
 
@@ -220,17 +302,20 @@ export default function PropertySummaryPage() {
 
   // group summary items by property for nice UI
   const byProperty = useMemo(() => {
-    const m = new Map<string, { header: { name: string; city: string; address?: string; code: string }, rows: SummaryItem[] }>();
+    const m = new Map<
+      string,
+      { header: { name: string; city: string; address?: string; code: string }; rows: SummaryItem[] }
+    >();
     for (const s of summary) {
       const key = s.property_code;
-      const g = m.get(key) || {
-        header: { name: s.property_name, city: s.city, address: s.address, code: s.property_code },
-        rows: [],
-      };
+      const g =
+        m.get(key) || {
+          header: { name: s.property_name, city: s.city, address: s.address, code: s.property_code },
+          rows: [],
+        };
       g.rows.push(s);
       m.set(key, g);
     }
-    // sort rows inside each property by tower → type
     for (const g of m.values()) {
       g.rows.sort((a, b) => {
         const at = a.tower_name || a.tower_code;
@@ -239,7 +324,6 @@ export default function PropertySummaryPage() {
         return TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type);
       });
     }
-    // return ordered by property name
     return Array.from(m.values()).sort((a, b) => a.header.name.localeCompare(b.header.name));
   }, [summary]);
 
@@ -265,7 +349,7 @@ export default function PropertySummaryPage() {
 
   return (
     <main className="min-h-screen bg-[#f6f7fb]">
-      <div className="mx-auto max-w-7xl px-4 md:px-6 py-6 space-y-4">
+      <div className="mx-auto max-w-[1440px] px-4 md:px-6 py-6 space-y-4">
         <header className="flex flex-col gap-2">
           <h1 className="text-2xl md:text-3xl font-semibold">Property Summary (Lowest Prices)</h1>
           <p className="text-sm text-muted-foreground">
@@ -276,7 +360,7 @@ export default function PropertySummaryPage() {
 
         {/* Controls */}
         <div className="card p-4">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
             <label className="block text-xs">
               Search project/tower
               <input
@@ -288,6 +372,7 @@ export default function PropertySummaryPage() {
               />
             </label>
 
+            {/* SMART: City */}
             <label className="block text-xs">
               City
               <select
@@ -296,10 +381,15 @@ export default function PropertySummaryPage() {
                 onChange={(e) => setSelectedCity(e.target.value)}
               >
                 <option value="">All</option>
-                {allCities.map(c => <option key={c} value={c}>{c}</option>)}
+                {availableCities.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
               </select>
             </label>
 
+            {/* SMART: Unit Type */}
             <label className="block text-xs">
               Unit Type
               <select
@@ -308,11 +398,120 @@ export default function PropertySummaryPage() {
                 onChange={(e) => setSelectedType(e.target.value)}
               >
                 <option value="">All</option>
-                {allTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                {availableTypes.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
               </select>
             </label>
 
+            {/* SMART: Amenities */}
             <label className="block text-xs">
+              Amenities
+              <select
+                className="input mt-1"
+                value={selectedAmenities}
+                onChange={(e) => setSelectedAmenities(e.target.value)}
+              >
+                <option value="">All</option>
+                {availableAmenities.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {/* SMART: Size range */}
+            <label className="block text-xs md:col-span-2">
+              Size (sqm): {hasValidSizeBounds ? `${sizeRange[0]} – ${sizeRange[1]}` : "—"}
+              <div className="mt-2">
+                {hasValidSizeBounds ? (
+                  <Range
+                    step={1}
+                    min={sizeBounds.min}
+                    max={sizeBounds.max}
+                    values={[
+                      Math.max(sizeBounds.min, Math.min(sizeRange[0], sizeBounds.max)),
+                      Math.max(sizeBounds.min, Math.min(sizeRange[1], sizeBounds.max)),
+                    ]}
+                    onChange={(vals) => {
+                      const lo = Math.max(sizeBounds.min, Math.min(vals[0], vals[1]));
+                      const hi = Math.min(sizeBounds.max, Math.max(vals[0], vals[1]));
+                      setSizeRange([lo, hi]);
+                    }}
+                    renderTrack={({ props, children }) => {
+                      const { key, ...rest } = (props as any) || {};
+                      return (
+                        <div key={key} {...rest} className="h-2 rounded-full bg-muted">
+                          {children}
+                        </div>
+                      );
+                    }}
+                    renderThumb={({ props }) => {
+                      const { key, ...rest } = (props as any) || {};
+                      return (
+                        <div
+                          key={key}
+                          {...rest}
+                          className="h-4 w-4 rounded-full bg-[color:var(--primary)] shadow"
+                          aria-label="sqm handle"
+                        />
+                      );
+                    }}
+                  />
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <div className="h-2 flex-1 rounded-full bg-muted opacity-40" />
+                    <span className="text-xs text-muted-foreground">
+                      Size filter unavailable for current selection
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 mt-2">
+                  <input
+                    className="input w-24"
+                    type="number"
+                    value={hasValidSizeBounds ? sizeRange[0] : 0}
+                    min={hasValidSizeBounds ? sizeBounds.min : 0}
+                    max={hasValidSizeBounds ? sizeRange[1] : 0}
+                    disabled={!hasValidSizeBounds}
+                    onChange={(e) =>
+                      setSizeRange([
+                        Math.max(
+                          sizeBounds.min,
+                          Math.min(Number(e.target.value || 0), hasValidSizeBounds ? sizeRange[1] : sizeBounds.max)
+                        ),
+                        sizeRange[1],
+                      ])
+                    }
+                  />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <input
+                    className="input w-24"
+                    type="number"
+                    value={hasValidSizeBounds ? sizeRange[1] : 0}
+                    min={hasValidSizeBounds ? sizeRange[0] : 0}
+                    max={hasValidSizeBounds ? sizeBounds.max : 0}
+                    disabled={!hasValidSizeBounds}
+                    onChange={(e) =>
+                      setSizeRange([
+                        sizeRange[0],
+                        Math.max(
+                          hasValidSizeBounds ? sizeRange[0] : 0,
+                          Math.min(Number(e.target.value || 0), sizeBounds.max)
+                        ),
+                      ])
+                    }
+                  />
+                </div>
+              </div>
+            </label>
+
+            {/* Min floor + OnHold */}
+            <label className="block text-xs md:col-span-2">
               Min Floor
               <div className="flex items-center gap-2 mt-1">
                 <input
@@ -329,7 +528,9 @@ export default function PropertySummaryPage() {
                   min={0}
                   max={50}
                   value={minFloor}
-                  onChange={(e) => setMinFloor(Math.max(0, Math.min(50, Number(e.target.value || 0))))}
+                  onChange={(e) =>
+                    setMinFloor(Math.max(0, Math.min(50, Number(e.target.value || 0))))
+                  }
                 />
               </div>
             </label>
@@ -353,32 +554,78 @@ export default function PropertySummaryPage() {
             <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-sm">
               <label className="block text-xs">
                 Discount %
-                <input className="input mt-1" type="number" step={0.1} value={discountPct} onChange={(e)=>setDiscountPct(Number(e.target.value || 0))} />
+                <input
+                  className="input mt-1"
+                  type="number"
+                  step={0.1}
+                  value={discountPct}
+                  onChange={(e) => setDiscountPct(Number(e.target.value || 0))}
+                />
               </label>
               <label className="block text-xs">
                 DP %
-                <input className="input mt-1" type="number" step={0.1} value={downPct} onChange={(e)=>setDownPct(Number(e.target.value || 0))} />
+                <input
+                  className="input mt-1"
+                  type="number"
+                  step={0.1}
+                  value={downPct}
+                  onChange={(e) => setDownPct(Number(e.target.value || 0))}
+                />
               </label>
               <label className="block text-xs">
                 Months
-                <input className="input mt-1" type="number" step={1} value={monthsToPay} onChange={(e)=>setMonthsToPay(Math.max(1, Math.floor(Number(e.target.value || 0))))} />
+                <input
+                  className="input mt-1"
+                  type="number"
+                  step={1}
+                  value={monthsToPay}
+                  onChange={(e) =>
+                    setMonthsToPay(Math.max(1, Math.floor(Number(e.target.value || 0))))
+                  }
+                />
               </label>
               <label className="block text-xs">
                 Reservation
-                <input className="input mt-1" type="number" step={1000} value={reservationFee} onChange={(e)=>setReservationFee(Math.max(0, Math.floor(Number(e.target.value || 0))))} />
+                <input
+                  className="input mt-1"
+                  type="number"
+                  step={1000}
+                  value={reservationFee}
+                  onChange={(e) =>
+                    setReservationFee(Math.max(0, Math.floor(Number(e.target.value || 0))))
+                  }
+                />
               </label>
               <label className="block text-xs">
                 Closing %
-                <input className="input mt-1" type="number" step={0.1} value={closingFeePct} onChange={(e)=>setClosingFeePct(Number(e.target.value || 0))} />
+                <input
+                  className="input mt-1"
+                  type="number"
+                  step={0.1}
+                  value={closingFeePct}
+                  onChange={(e) => setClosingFeePct(Number(e.target.value || 0))}
+                />
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block text-xs">
                   15 yrs %
-                  <input className="input mt-1" type="number" step={0.1} value={rate15yr} onChange={(e)=>setRate15yr(Number(e.target.value || 0))} />
+                  <input
+                    className="input mt-1"
+                    type="number"
+                    step={0.1}
+                    value={rate15yr}
+                    onChange={(e) => setRate15yr(Number(e.target.value || 0))}
+                  />
                 </label>
                 <label className="block text-xs">
                   20 yrs %
-                  <input className="input mt-1" type="number" step={0.1} value={rate20yr} onChange={(e)=>setRate20yr(Number(e.target.value || 0))} />
+                  <input
+                    className="input mt-1"
+                    type="number"
+                    step={0.1}
+                    value={rate20yr}
+                    onChange={(e) => setRate20yr(Number(e.target.value || 0))}
+                  />
                 </label>
               </div>
             </div>
@@ -391,14 +638,14 @@ export default function PropertySummaryPage() {
 
         {!loading && !error && byProperty.length === 0 && (
           <div className="card p-8 text-muted-foreground">
-            No results match your filters. Try lowering the minimum floor or clearing filters.
+            No results match your filters. Try adjusting the size range, lowering the minimum floor, or clearing filters.
           </div>
         )}
 
         {!loading && !error && byProperty.length > 0 && (
           <div className="space-y-6">
-            {byProperty.map(group => {
-              // make a map tower -> items for rendering cards
+            {byProperty.map((group) => {
+              // tower -> items
               const towers = new Map<string, SummaryItem[]>();
               for (const r of group.rows) {
                 const key = r.tower_name || r.tower_code;
@@ -406,7 +653,9 @@ export default function PropertySummaryPage() {
                 arr.push(r);
                 towers.set(key, arr);
               }
-              const towerEntries = Array.from(towers.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
+              const towerEntries = Array.from(towers.entries()).sort((a, b) =>
+                a[0].localeCompare(b[0])
+              );
 
               return (
                 <section key={group.header.code} className="card p-0 overflow-hidden">
@@ -415,10 +664,13 @@ export default function PropertySummaryPage() {
                       <div>
                         <div className="text-lg font-semibold">{group.header.name}</div>
                         <div className="text-xs opacity-90">
-                          {group.header.city}{group.header.address ? ` • ${group.header.address}` : ""}
+                          {group.header.city}
+                          {group.header.address ? ` • ${group.header.address}` : ""}
                         </div>
                       </div>
-                      <div className="text-xs opacity-90">Showing lowest prices per tower &amp; type (≥ {minFloor}F)</div>
+                      <div className="text-xs opacity-90">
+                        Showing lowest prices per tower &amp; type (≥ {minFloor}F)
+                      </div>
                     </div>
                   </div>
 
@@ -435,11 +687,13 @@ export default function PropertySummaryPage() {
                               const k = `${s.property_code}__${s.tower_code}__${s.type}`;
                               const isOpen = openComputeKey === k;
                               const u = s.minUnit;
-                              const id = u.unit_id || makeUnitId({
-                                property_code: u.property_code,
-                                tower_code: u.tower_code,
-                                building_unit: u.BuildingUnit
-                              });
+                              const id =
+                                u.unit_id ||
+                                makeUnitId({
+                                  property_code: u.property_code,
+                                  tower_code: u.tower_code,
+                                  building_unit: u.BuildingUnit,
+                                });
                               const c = computeSample(s.minPrice);
 
                               return (
@@ -449,7 +703,8 @@ export default function PropertySummaryPage() {
                                       <div className="text-sm text-muted-foreground">{s.type}</div>
                                       <div className="text-lg font-semibold">{fmtPhp(s.minPrice)}</div>
                                       <div className="text-xs text-muted-foreground mt-0.5">
-                                        {u.BuildingUnit} • {u.GrossAreaSQM} sqm • RFO {u.RFODate || "TBA"}
+                                        {u.BuildingUnit} • {u.GrossAreaSQM} sqm • RFO{" "}
+                                        {u.RFODate || "TBA"}
                                       </div>
                                     </div>
                                     <div className="flex flex-col items-end gap-2">
@@ -472,36 +727,60 @@ export default function PropertySummaryPage() {
                                     <div className="mt-3 rounded-lg border p-3 text-sm bg-slate-50">
                                       <div className="grid grid-cols-2 gap-3">
                                         <div>
-                                          <div className="text-xs text-muted-foreground">TCP (disc {discountPct}%)</div>
+                                          <div className="text-xs text-muted-foreground">
+                                            TCP (disc {discountPct}%)
+                                          </div>
                                           <div className="font-semibold">{fmtPhp(c.TCP)}</div>
                                         </div>
                                         <div>
-                                          <div className="text-xs text-muted-foreground">DP {downPct}%</div>
+                                          <div className="text-xs text-muted-foreground">
+                                            DP {downPct}%
+                                          </div>
                                           <div className="font-semibold">{fmtPhp(c.dpAmount)}</div>
                                         </div>
                                         <div>
-                                          <div className="text-xs text-muted-foreground">Reservation</div>
-                                          <div className="font-semibold">{fmtPhp(reservationFee)}</div>
+                                          <div className="text-xs text-muted-foreground">
+                                            Reservation
+                                          </div>
+                                          <div className="font-semibold">
+                                            {fmtPhp(reservationFee)}
+                                          </div>
                                         </div>
                                         <div>
-                                          <div className="text-xs text-muted-foreground">Net DP / {monthsToPay} mos</div>
+                                          <div className="text-xs text-muted-foreground">
+                                            Net DP / {monthsToPay} mos
+                                          </div>
                                           <div className="font-semibold">{fmtPhp(c.dpMonthly)}</div>
                                         </div>
                                         <div>
-                                          <div className="text-xs text-muted-foreground">Closing Fee {closingFeePct}%</div>
-                                          <div className="font-semibold">{fmtPhp(c.closingFee)}</div>
+                                          <div className="text-xs text-muted-foreground">
+                                            Closing Fee {closingFeePct}%
+                                          </div>
+                                          <div className="font-semibold">
+                                            {fmtPhp(c.closingFee)}
+                                          </div>
                                         </div>
                                         <div>
                                           <div className="text-xs text-muted-foreground">Balance</div>
-                                          <div className="font-semibold">{fmtPhp(c.bankBalance)}</div>
+                                          <div className="font-semibold">
+                                            {fmtPhp(c.bankBalance)}
+                                          </div>
                                         </div>
                                         <div>
-                                          <div className="text-xs text-muted-foreground">15 yrs @ {rate15yr}%</div>
-                                          <div className="font-semibold">{fmtPhp(c.monthly15)}</div>
+                                          <div className="text-xs text-muted-foreground">
+                                            15 yrs @ {rate15yr}%
+                                          </div>
+                                          <div className="font-semibold">
+                                            {fmtPhp(c.monthly15)}
+                                          </div>
                                         </div>
                                         <div>
-                                          <div className="text-xs text-muted-foreground">20 yrs @ {rate20yr}%</div>
-                                          <div className="font-semibold">{fmtPhp(c.monthly20)}</div>
+                                          <div className="text-xs text-muted-foreground">
+                                            20 yrs @ {rate20yr}%
+                                          </div>
+                                          <div className="font-semibold">
+                                            {fmtPhp(c.monthly20)}
+                                          </div>
                                         </div>
                                       </div>
                                     </div>
