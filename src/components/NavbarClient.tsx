@@ -66,17 +66,6 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
   const SkeletonPill = () => <div className="animate-pulse rounded-full bg-gray-200 h-7 w-20" />;
 
   // ---------- Menus (decluttered) ----------
-  const AVAILABILITY_DROPDOWN: DropdownLink = {
-    kind: "dropdown",
-    id: "availability",
-    label: "Availability",
-    items: [
-      { kind: "link", label: "Availability", href: "/availability" },
-      { kind: "link", label: "Compare", href: "/compare" },
-      { kind: "link", label: "Summary", href: "/summary" },
-    ],
-  };
-
   const MANAGER_DROPDOWN: DropdownLink = {
     kind: "dropdown",
     id: "manager",
@@ -88,6 +77,20 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
       { kind: "link", label: "Team", href: "/dashboard/team" },
     ],
   };
+
+  const AVAILABILITY_DROPDOWN: DropdownLink = {
+    kind: "dropdown",
+    id: "availability",
+    label: "Availability",
+    items: [
+      { kind: "link", label: "Availability", href: "/availability" },
+      { kind: "link", label: "Summary", href: "/summary" },
+      { kind: "link", label: "Compare", href: "/compare" },
+      
+    ],
+  };
+
+
 
   // Public/client
   const clientLinks: NavLink[] = [
