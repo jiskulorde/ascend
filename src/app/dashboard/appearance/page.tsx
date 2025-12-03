@@ -1,3 +1,6 @@
+// src/app/dashboard/appearance/page.tsx
+
+
 import { serverSupabase } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import AppearanceClient from "@/components/dashboard/AppearanceClient"; 

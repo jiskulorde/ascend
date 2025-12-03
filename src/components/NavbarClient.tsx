@@ -1,3 +1,4 @@
+// src/components/NavbarClient.tsx
 "use client";
 
 import Link from "next/link";
@@ -51,33 +52,32 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
     return () => subscription.unsubscribe();
   }, [supabase]);
 
-  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname?.startsWith(href));
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname?.startsWith(href);
 
   // Styles
-  const pill =
-    "rounded-full px-3 py-2 text-sm font-medium transition hover:bg-[color:var(--secondary)] hover:text-foreground";
-  const activePill = "bg-[color:var(--primary)] text-[color:var(--primary-foreground)] shadow-sm";
-  const shell = "bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 border-b border-border";
+  const shell =
+    "bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 border-b border-border";
+
+ // ✨ Softer default + hover
+const navLinkBase =
+  "rounded-full px-3 py-2 text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition";
+
+// ✨ Very subtle active state (light chip, brand-colored text, thin border)
+const navLinkActive =
+  "bg-slate-100 text-[color:var(--primary)] border border-slate-200";
+
+
   const dropdownPanel =
-    "absolute left-0 mt-2 w-56 rounded-xl border border-border bg-card text-card-foreground shadow-lg z-50 transition-all duration-150 origin-top";
+    "absolute left-0 mt-2 w-56 rounded-2xl border border-slate-100 bg-white text-slate-900 shadow-xl z-40 py-1";
   const dropdownOpen = "opacity-100 scale-100 pointer-events-auto";
   const dropdownClosed = "opacity-0 scale-95 pointer-events-none";
 
-  const SkeletonPill = () => <div className="animate-pulse rounded-full bg-gray-200 h-7 w-20" />;
+  const SkeletonPill = () => (
+    <div className="h-7 w-20 animate-pulse rounded-full bg-gray-200" />
+  );
 
   // ---------- Menus (decluttered) ----------
-  const MANAGER_DROPDOWN: DropdownLink = {
-    kind: "dropdown",
-    id: "manager",
-    label: "Manager",
-    items: [
-      // You can change this path later when you add the page
-      { kind: "link", label: "Appearance", href: "/dashboard/appearance" },
-      { kind: "link", label: "Reports", href: "/dashboard/reports" },
-      { kind: "link", label: "Team", href: "/dashboard/team" },
-    ],
-  };
-
   const AVAILABILITY_DROPDOWN: DropdownLink = {
     kind: "dropdown",
     id: "availability",
@@ -86,72 +86,64 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
       { kind: "link", label: "Availability", href: "/availability" },
       { kind: "link", label: "Summary", href: "/summary" },
       { kind: "link", label: "Compare", href: "/compare" },
-      
     ],
   };
 
-
-
-  // Public/client
-  const clientLinks: NavLink[] = [
+  const MAIN_LINKS: NavLink[] = [
     { kind: "link", label: "Home", href: "/" },
-    { kind: "link", label: "Availability", href: "/availability" },
     { kind: "link", label: "Projects", href: "/projects" },
     { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
-  ];
-
-  // Agent
-  const agentLinks: NavLink[] = [
+    { kind: "link", label: "About", href: "/about" },
     AVAILABILITY_DROPDOWN,
-    { kind: "link", label: "Projects", href: "/projects" },
-    { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
   ];
 
-  // Manager/Admin
-  const managerLinks: NavLink[] = [
-    AVAILABILITY_DROPDOWN,
-    MANAGER_DROPDOWN,
-    { kind: "link", label: "Clients", href: "/clients" },
-    { kind: "link", label: "Projects", href: "/projects" },
-    { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
-  ];
+  // For now, center nav is the same for all roles (cleaner UX)
+  const links: NavLink[] = loading ? [] : MAIN_LINKS;
 
-  const links: NavLink[] = (() => {
-    if (loading) return [];
-    if (!isSignedIn) return clientLinks;
-    if (role === "CLIENT") return clientLinks;
-    if (role === "AGENT") return agentLinks;
-    if (role === "MANAGER" || role === "ADMIN") return managerLinks;
-    return clientLinks;
-  })();
-
-  // ---------- Dropdown handling ----------
+  // ---------- Dropdown & profile handling ----------
   const [openDropdown, setOpenDropdown] = useState<null | string>(null);
   const [isOpenMobile, setIsOpenMobile] = useState(false);
-  const ddRef = useRef<HTMLDivElement>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
-      if (ddRef.current && !ddRef.current.contains(e.target as Node)) setOpenDropdown(null);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpenDropdown(null);
+        setProfileOpen(false);
+      }
     };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, []);
 
+  const profileLabel =
+    role === "ADMIN"
+      ? "Admin dashboard"
+      : role === "MANAGER"
+      ? "Manager dashboard"
+      : role === "AGENT"
+      ? "My dashboard"
+      : "My account";
+
   return (
     <nav className={`sticky top-0 z-50 ${shell}`}>
       <div className="mx-auto max-w-7xl px-4 md:px-6">
-        <div className="h-16 flex items-center justify-between gap-3">
+        <div
+          className="flex h-16 items-center justify-between gap-3"
+          ref={rootRef}
+        >
           {/* Brand */}
           <Link href="/" className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-xl bg-[color:var(--primary)]" />
-            <span className="text-lg md:text-xl font-semibold tracking-tight">
+            <span className="text-lg font-semibold tracking-tight md:text-xl">
               <span className="text-[color:var(--primary)]">Ascend</span> • DMCI
             </span>
           </Link>
 
           {/* Desktop nav */}
-          <div className="hidden md:flex items-center gap-2" ref={ddRef}>
+          <div className="hidden items-center gap-1 md:flex">
             {loading ? (
               <>
                 <SkeletonPill />
@@ -162,22 +154,34 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
                 link.kind === "dropdown" ? (
                   <div key={link.id} className="relative">
                     <button
-                      onClick={() => setOpenDropdown((v) => (v === link.id ? null : link.id))}
-                      className={`${pill} inline-flex items-center gap-1`}
+                      onClick={() =>
+                        setOpenDropdown((v) => (v === link.id ? null : link.id))
+                      }
+                      className={`${navLinkBase} inline-flex items-center gap-1 ${
+                        openDropdown === link.id ? navLinkActive : ""
+                      }`}
                     >
                       {link.label}
                       <ChevronDown
-                        size={16}
-                        className={`transition-transform ${openDropdown === link.id ? "rotate-180" : ""}`}
+                        size={14}
+                        className={`transition-transform ${
+                          openDropdown === link.id ? "rotate-180" : ""
+                        }`}
                       />
                     </button>
-                    <div className={`${dropdownPanel} ${openDropdown === link.id ? dropdownOpen : dropdownClosed}`}>
+                    <div
+                      className={`${dropdownPanel} ${
+                        openDropdown === link.id
+                          ? dropdownOpen
+                          : dropdownClosed
+                      }`}
+                    >
                       {link.items.map((item) => (
                         <Link
                           key={item.href}
                           href={item.href}
-                          className={`block px-3 py-2 text-sm rounded-lg mx-2 my-1 hover:bg-muted ${
-                            isActive(item.href) ? "bg-muted font-medium" : ""
+                          className={`mx-1 my-0.5 block rounded-xl px-3 py-2 text-sm text-slate-700 hover:bg-slate-100/80 ${
+                            isActive(item.href) ? "bg-slate-100 font-medium" : ""
                           }`}
                           onClick={() => setOpenDropdown(null)}
                         >
@@ -190,7 +194,9 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
                   <Link
                     key={link.href}
                     href={link.href}
-                    className={`${pill} ${isActive(link.href) ? activePill : ""}`}
+                    className={`${navLinkBase} ${
+                      isActive(link.href) ? navLinkActive : ""
+                    }`}
                   >
                     {link.label}
                   </Link>
@@ -199,22 +205,80 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
             )}
           </div>
 
-          {/* Right side auth */}
-          <div className="hidden md:flex items-center gap-2">
+          {/* Right side auth + profile */}
+          <div className="hidden items-center gap-2 md:flex">
             {loading ? (
               <SkeletonPill />
             ) : isSignedIn ? (
-              <>
-                {role && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--secondary)] px-3 py-1 text-xs text-foreground">
-                    <User size={14} /> {role}
-                  </span>
-                )}
-                {(role === "MANAGER" || role === "ADMIN") && <PreviewSwitch show={true} />}
-                <form action="/auth/signout" method="post">
-                  <button className="btn btn-outline">Sign out</button>
-                </form>
-              </>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setProfileOpen((v) => !v)}
+                  className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-2 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                >
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[color:var(--primary)] text-[color:var(--primary-foreground)]">
+                    <User size={14} />
+                  </div>
+                  {role && (
+                    <span className="hidden sm:inline uppercase tracking-wide text-[10px]">
+                      {role}
+                    </span>
+                  )}
+                  <ChevronDown
+                    size={14}
+                    className={`transition-transform ${
+                      profileOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+
+                {/* Profile dropdown */}
+                <div
+                  className={`absolute right-0 mt-2 w-60 origin-top-right rounded-xl border border-border bg-card text-sm text-card-foreground shadow-lg transition-all duration-150 ${
+                    profileOpen
+                      ? "scale-100 opacity-100 pointer-events-auto"
+                      : "scale-95 opacity-0 pointer-events-none"
+                  }`}
+                >
+                  <div className="border-b px-3 pt-3 pb-2 text-xs">
+                    <div className="font-semibold">{profileLabel}</div>
+                    <div className="text-slate-500">
+                      Signed in as <span className="uppercase">{role}</span>
+                    </div>
+                  </div>
+
+                  <div className="py-1">
+                    <Link
+                      href="/dashboard"
+                      className="block px-3 py-2 text-sm hover:bg-muted"
+                      onClick={() => setProfileOpen(false)}
+                    >
+                      Open dashboard
+                    </Link>
+
+                    {(role === "MANAGER" || role === "ADMIN") && (
+                      <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
+                        <span>Preview mode</span>
+                        <PreviewSwitch show={true} />
+                      </div>
+                    )}
+
+                    <form
+                      action="/auth/signout"
+                      method="post"
+                      className="mt-1 border-t"
+                    >
+                      <button
+                        type="submit"
+                        className="block w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                        onClick={() => setProfileOpen(false)}
+                      >
+                        Sign out
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </div>
             ) : (
               <>
                 <Link href="/auth/login" className="btn btn-ghost">
@@ -229,7 +293,7 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
 
           {/* Mobile toggle */}
           <button
-            className="md:hidden inline-flex items-center justify-center rounded-full p-2 hover:bg-muted"
+            className="inline-flex items-center justify-center rounded-full p-2 hover:bg-muted md:hidden"
             onClick={() => setIsOpenMobile((v) => !v)}
             aria-label="Toggle navigation"
           >
@@ -240,12 +304,12 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
 
       {/* Mobile drawer */}
       {isOpenMobile && (
-        <div className="md:hidden border-t border-border bg-white">
-          <div className="max-w-7xl mx-auto px-4 py-3 space-y-1">
+        <div className="border-t border-border bg-white md:hidden">
+          <div className="mx-auto max-w-7xl space-y-1 px-4 py-3">
             {links.map((link) =>
               link.kind === "dropdown" ? (
                 <details key={link.id} className="rounded-lg">
-                  <summary className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-muted cursor-pointer">
+                  <summary className="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 hover:bg-muted">
                     {link.label} <ChevronDown size={16} />
                   </summary>
                   <div className="pl-3">
@@ -273,25 +337,33 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
               )
             )}
 
-            {/* Mobile auth */}
-            <div className="pt-2">
+            {/* Mobile dashboard + auth */}
+            <div className="space-y-2 pt-2">
+              {isSignedIn && (
+                <Link
+                  href="/dashboard"
+                  className="block rounded-lg bg-[color:var(--primary)] px-3 py-2 text-center text-sm font-medium text-[color:var(--primary-foreground)]"
+                  onClick={() => setIsOpenMobile(false)}
+                >
+                  Open dashboard
+                </Link>
+              )}
+
               {isSignedIn ? (
-                <>
-                  {(role === "MANAGER" || role === "ADMIN") && (
-                    <div className="mb-2">
-                      <PreviewSwitch show={true} />
-                    </div>
-                  )}
-                  <form action="/auth/signout" method="post">
-                    <button className="btn btn-outline btn-block">Sign out</button>
-                  </form>
-                </>
+                <form action="/auth/signout" method="post">
+                  <button className="btn btn-outline btn-block">
+                    Sign out
+                  </button>
+                </form>
               ) : (
                 <div className="flex flex-col gap-2">
                   <Link href="/auth/login" className="btn btn-ghost btn-block">
                     Sign in
                   </Link>
-                  <Link href="/auth/login" className="btn btn-primary btn-block">
+                  <Link
+                    href="/auth/login"
+                    className="btn btn-primary btn-block"
+                  >
                     Create account
                   </Link>
                 </div>

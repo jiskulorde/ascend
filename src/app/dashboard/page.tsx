@@ -1,18 +1,16 @@
+// src/app/dashboard/page.tsx
+
 import { serverSupabase } from "@/lib/supabase/server";
 
-export default async function Dashboard() {
+export default async function DashboardPage() {
   const supabase = await serverSupabase();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
 
-  const { data: { session } } = await supabase.auth.getSession();
-
-  // If not logged-in we’ll just show a friendly message (guards come in 3B)
+  // This should always exist because layout already guards, but just in case:
   if (!session) {
-    return (
-      <main className="p-6">
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="mt-2 text-slate-600">You’re not signed in. <a className="underline" href="/auth/login">Sign in</a></p>
-      </main>
-    );
+    return null;
   }
 
   const { data: profile } = await supabase
@@ -21,16 +19,48 @@ export default async function Dashboard() {
     .eq("id", session.user.id)
     .single();
 
+  const role = (profile?.role || "CLIENT") as
+    | "CLIENT"
+    | "AGENT"
+    | "MANAGER"
+    | "ADMIN";
+
   return (
-    <main className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold">Dashboard</h1>
-      <p className="text-slate-600">
-        Welcome {profile?.full_name || session.user.email} — role: <b>{profile?.role ?? "CLIENT"}</b>
+    <div className="space-y-4">
+      <h1 className="text-2xl font-semibold tracking-tight">
+        {role === "ADMIN"
+          ? "Admin overview"
+          : role === "MANAGER"
+          ? "Manager overview"
+          : role === "AGENT"
+          ? "My sales dashboard"
+          : "My dashboard"}
+      </h1>
+
+      <p className="text-sm text-slate-600">
+        Welcome {profile?.full_name || session.user.email}.
       </p>
 
-      <form action="/auth/signout" method="post">
-        <button className="rounded-md border px-3 py-1">Sign out</button>
-      </form>
-    </main>
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold mb-1">Quick actions</h2>
+          <p className="text-xs text-slate-500">
+            Jump to CRM, ads schedule, or availability.
+          </p>
+        </div>
+        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold mb-1">Today</h2>
+          <p className="text-xs text-slate-500">
+            Later we can show follow-ups due today and ad duty here.
+          </p>
+        </div>
+        <div className="rounded-2xl border bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold mb-1">Status</h2>
+          <p className="text-xs text-slate-500">
+            Manager/admin views can show lead counts & campaign stats.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }

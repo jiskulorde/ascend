@@ -1,9 +1,12 @@
+// src/components/Navbar.tsx
 import { serverSupabase } from "@/lib/supabase/server";
 import NavbarClient from "./NavbarClient";
 
 export default async function Navbar() {
   const supabase = await serverSupabase();
-  const { data: { session } } = await supabase.auth.getSession();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
 
   let role: "CLIENT" | "AGENT" | "MANAGER" | "ADMIN" | undefined;
 
