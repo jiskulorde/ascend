@@ -2,10 +2,16 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Range } from "react-range";
 import { makeUnitId } from "@/lib/unit-id";
+
+type LastUpdated = {
+  date: string;
+  time: string;
+  fileName?: string;
+};
 
 type UnitRow = {
   property_code: string;
@@ -113,12 +119,126 @@ function fmtPhp(n: number) {
   }).format(n);
 }
 
+function fmtCompactPhp(n: number) {
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (n >= 1_000_000) return `₱${(n / 1_000_000).toFixed(n >= 10_000_000 ? 1 : 2)}M`;
+  if (n >= 1_000) return `₱${Math.round(n / 1_000)}K`;
+  return `₱${Math.round(n)}`;
+}
+
 function fmtNumber(n: number, decimals = 0) {
   if (!Number.isFinite(n)) return "—";
   return new Intl.NumberFormat("en-PH", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(n);
+}
+
+function parseLastUpdatedText(value: unknown): LastUpdated | null {
+  if (typeof value !== "string") return null;
+
+  let clean = value.trim();
+  if (!clean) return null;
+
+  if (clean.toLowerCase().startsWith("last updated:")) {
+    clean = clean.slice("last updated:".length).trim();
+  }
+
+  const separator = clean.includes("•") ? "•" : clean.includes("|") ? "|" : null;
+  if (!separator) return null;
+
+  const parts = clean.split(separator).map((part) => part.trim());
+  const datePart = parts[0];
+  const timePart = parts[1];
+  if (!datePart || !timePart) return null;
+
+  return {
+    date: datePart,
+    time: timePart,
+  };
+}
+
+function formatLastUpdatedFromDate(value: string | number | Date): LastUpdated | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return {
+    date: new Intl.DateTimeFormat("en-PH", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(date),
+    time: new Intl.DateTimeFormat("en-PH", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(date),
+  };
+}
+
+function normalizeLastUpdated(json: any, response?: Response): LastUpdated | null {
+  const direct =
+    json?.latestLog ||
+    json?.lastUpdated ||
+    json?.last_update ||
+    json?.lastUpdatedText ||
+    json?.lastUpdatedDisplay ||
+    json?.meta?.lastUpdatedText ||
+    json?.data?.[0]?.lastUpdated ||
+    json?.data?.[0]?.last_updated ||
+    json?.data?.[0]?.updatedAt;
+
+  const textValue = parseLastUpdatedText(direct);
+  if (textValue) return textValue;
+
+  if (direct && typeof direct === "object" && direct.date && direct.time) {
+    return {
+      date: String(direct.date),
+      time: String(direct.time),
+    };
+  }
+
+  const directDate =
+    json?.lastUpdatedDate ||
+    json?.dateUpdated ||
+    json?.updatedDate ||
+    json?.inventoryDate ||
+    json?.meta?.lastUpdatedDate;
+
+  const directTime =
+    json?.lastUpdatedTime ||
+    json?.timeUpdated ||
+    json?.updatedTime ||
+    json?.inventoryTime ||
+    json?.meta?.lastUpdatedTime;
+
+  if (directDate && directTime) {
+    return {
+      date: String(directDate),
+      time: String(directTime),
+    };
+  }
+
+  const possibleDateValue =
+    direct ||
+    json?.updatedAt ||
+    json?.lastUpdatedAt ||
+    json?.last_updated ||
+    json?.last_updated_at ||
+    json?.generatedAt ||
+    json?.meta?.lastUpdated ||
+    json?.meta?.updatedAt ||
+    json?.meta?.generatedAt ||
+    response?.headers.get("x-last-updated") ||
+    response?.headers.get("last-modified");
+
+  const possibleTextValue = parseLastUpdatedText(possibleDateValue);
+  if (possibleTextValue) return possibleTextValue;
+
+  if (possibleDateValue) return formatLastUpdatedFromDate(possibleDateValue);
+
+  return null;
 }
 
 function typeSort(a: string, b: string) {
@@ -191,6 +311,7 @@ export default function PropertySummaryPage() {
   const [rows, setRows] = useState<UnitRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<LastUpdated | null>(null);
 
   const [statusMode, setStatusMode] = useState<StatusMode>("available");
   const [selectedProjectCodes, setSelectedProjectCodes] = useState<string[]>([]);
@@ -240,6 +361,13 @@ export default function PropertySummaryPage() {
         const json = await res.json();
         const data: UnitRow[] = Array.isArray(json.data) ? json.data : [];
         setRows(data);
+
+        // Same source used by the Availability page.
+        if (json.latestLog) {
+          setLastUpdated(json.latestLog);
+        } else {
+          setLastUpdated(normalizeLastUpdated(json, res));
+        }
       } catch (e: any) {
         setError(e?.message || "Failed to fetch availability");
       } finally {
@@ -741,21 +869,21 @@ export default function PropertySummaryPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f6f7fb]">
-      <div className="mx-auto max-w-[1680px] px-4 md:px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-5 items-start">
+    <main className="min-h-screen bg-[#f6f7fb] text-[11px] sm:text-xs md:text-sm">
+      <div className="mx-auto max-w-[1680px] px-1.5 py-2 sm:px-3 md:px-6 md:py-6">
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[300px_1fr] lg:gap-5 items-start">
           <aside className="card p-0 overflow-hidden lg:sticky lg:top-24">
-            <div className="bg-[#0f172a] text-white px-4 py-4">
-              <div className="flex items-start justify-between gap-3">
+            <div className="bg-[#0f172a] text-white px-2.5 py-2 sm:px-4 sm:py-4">
+              <div className="flex items-start justify-between gap-2 sm:gap-3">
                 <div>
-                  <div className="text-xs uppercase tracking-wide opacity-70">Inventory Navigation</div>
-                  <div className="text-lg font-semibold">All Projects</div>
-                  <div className="text-xs opacity-80 mt-1">
+                  <div className="text-[9px] sm:text-xs uppercase tracking-wide opacity-70">Inventory Navigation</div>
+                  <div className="text-xs sm:text-lg font-semibold">All Projects</div>
+                  <div className="text-[10px] sm:text-xs opacity-80 mt-0.5 sm:mt-1">
                     Multi-select projects • {allProjectNavItems.length} total
                   </div>
                 </div>
                 <button
-                  className="lg:hidden rounded-lg bg-white/10 px-3 py-2 text-xs font-medium hover:bg-white/20"
+                  className="lg:hidden rounded-md bg-white/10 px-2 py-1 text-[10px] font-medium hover:bg-white/20"
                   onClick={() => setMobileProjectOpen((prev) => !prev)}
                 >
                   {mobileProjectOpen ? "Hide" : "Show"}
@@ -764,9 +892,9 @@ export default function PropertySummaryPage() {
             </div>
 
             <div className={`${mobileProjectOpen ? "block" : "hidden"} lg:block`}>
-              <div className="p-3 border-b bg-white space-y-3">
+              <div className="p-2 sm:p-3 border-b bg-white space-y-1.5 sm:space-y-3">
               <input
-                className="input"
+                className="input h-8 text-[11px] sm:h-10 sm:text-sm"
                 type="text"
                 value={projectQ}
                 onChange={(e) => setProjectQ(e.target.value)}
@@ -774,9 +902,9 @@ export default function PropertySummaryPage() {
               />
 
               <button
-                className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
+                className={`w-full rounded-md border px-2 py-1.5 text-left text-[11px] sm:px-3 sm:py-2 sm:text-sm transition ${
                   selectedProjectCodes.length === 0
-                    ? "bg-blue-50 border-blue-200 text-blue-700"
+                    ? "bg-[#f4f7fb] border-[#d9e2ef] text-[#243b53]"
                     : "bg-white hover:bg-slate-50"
                 }`}
                 onClick={() => {
@@ -786,12 +914,12 @@ export default function PropertySummaryPage() {
                 }}
               >
                 <div className="font-semibold">View All Projects</div>
-                <div className="text-xs text-muted-foreground">Clear project selection only</div>
+                <div className="hidden sm:block text-xs text-muted-foreground">Clear project selection only</div>
               </button>
 
               {selectedProjectCodes.length > 0 && (
                 <button
-                  className="w-full rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-left text-sm text-red-700 hover:bg-red-100"
+                  className="w-full rounded-md border border-red-100 bg-red-50 px-2 py-1.5 text-left text-[11px] text-red-700 hover:bg-red-100 sm:px-3 sm:py-2 sm:text-sm"
                   onClick={() => setSelectedProjectCodes([])}
                 >
                   Clear {selectedProjectCodes.length} selected project{selectedProjectCodes.length === 1 ? "" : "s"}
@@ -799,14 +927,14 @@ export default function PropertySummaryPage() {
               )}
             </div>
 
-            <div className="max-h-[calc(100vh-330px)] overflow-y-auto p-2 space-y-2">
+            <div className="max-h-[36vh] lg:max-h-[calc(100vh-330px)] overflow-y-auto p-1.5 sm:p-2 grid grid-cols-2 gap-1 lg:block lg:space-y-2">
               {projectNavItems.map((p) => {
                 const active = selectedProjectCodes.includes(p.property_code);
 
                 return (
                   <button
                     key={p.property_code}
-                    className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                    className={`w-full rounded-md lg:rounded-lg border px-1.5 py-1.5 sm:px-3 sm:py-3 text-left transition ${
                       active
                         ? "bg-[color:var(--primary)] text-white border-[color:var(--primary)] shadow-sm"
                         : "bg-white hover:bg-slate-50 border-slate-200"
@@ -819,16 +947,16 @@ export default function PropertySummaryPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold leading-snug truncate">{p.property_name}</div>
-                        <div className={`text-xs mt-0.5 truncate ${active ? "text-white/80" : "text-muted-foreground"}`}>
+                        <div className="text-[10px] sm:text-sm font-semibold leading-tight line-clamp-2 lg:truncate">{p.property_name}</div>
+                        <div className={`hidden sm:block text-[10px] sm:text-xs mt-0.5 truncate ${active ? "text-white/80" : "text-muted-foreground"}`}>
                           {p.city || "No city"}
                         </div>
                       </div>
-                      <div className={`rounded-full px-2 py-0.5 text-[11px] ${active ? "bg-white/20" : "bg-slate-100"}`}>
+                      <div className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? "bg-white/20" : "bg-slate-100"}`}>
                         {active ? "✓" : p.unitCount}
                       </div>
                     </div>
-                    <div className={`text-xs mt-2 ${active ? "text-white/85" : "text-muted-foreground"}`}>
+                    <div className={`hidden sm:block text-xs mt-2 ${active ? "text-white/85" : "text-muted-foreground"}`}>
                       Lowest in inventory: <span className="font-semibold">{fmtPhp(p.lowestPrice)}</span>
                     </div>
                   </button>
@@ -842,26 +970,31 @@ export default function PropertySummaryPage() {
             </div>
           </aside>
 
-          <section className="space-y-4 min-w-0">
-            <header className="space-y-3">
+          <section className="space-y-2 md:space-y-4 min-w-0">
+            <header className="space-y-2 md:space-y-3">
               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl md:text-3xl font-semibold">Property Summary</h1>
-                  <p className="text-sm text-muted-foreground mt-1 max-w-4xl">
+                  <h1 className="text-base sm:text-2xl md:text-3xl font-semibold">Property Summary</h1>
+                  <p className="hidden sm:block text-xs md:text-sm text-muted-foreground mt-1 max-w-4xl">
                     List view by project and building. Click a row to view details, computation, and full unit information.
                   </p>
+                  {lastUpdated && (
+                    <p className="mt-1 text-[10px] font-medium text-slate-500 sm:text-xs">
+                      Last updated: <span className="font-semibold text-slate-700">{lastUpdated.date}</span> • {lastUpdated.time}
+                    </p>
+                  )}
                 </div>
 
-                <div className="card px-4 py-3 min-w-[260px]">
-                  <div className="text-xs text-muted-foreground">Viewing</div>
-                  <div className="font-semibold truncate">{selectedProjectNames}</div>
-                  <div className="text-xs text-muted-foreground mt-1">
+                <div className="card px-2.5 py-1.5 sm:px-4 sm:py-3 min-w-0 md:min-w-[260px]">
+                  <div className="text-[10px] sm:text-xs text-muted-foreground">Viewing</div>
+                  <div className="text-xs sm:text-base font-semibold truncate">{selectedProjectNames}</div>
+                  <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
                     {stats.matchingUnits} units • {stats.dealRows} lowest rows
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="grid grid-cols-5 gap-1 md:gap-3">
                 <StatCard label="Matching Units" value={fmtNumber(stats.matchingUnits)} />
                 <StatCard label="Projects Found" value={fmtNumber(stats.projectCount)} />
                 <StatCard label="Buildings Found" value={fmtNumber(stats.towerCount)} />
@@ -870,12 +1003,12 @@ export default function PropertySummaryPage() {
               </div>
             </header>
 
-            <div className="card p-4 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_180px_160px_140px] gap-3 items-end">
-                <label className="block text-xs md:col-span-2">
+            <div className="card p-1.5 sm:p-4 space-y-1.5 sm:space-y-4">
+              <div className="grid grid-cols-[1fr_74px_64px] sm:grid-cols-2 md:grid-cols-[1fr_180px_180px_160px_140px] gap-1 sm:gap-3 items-end">
+                <label className="block text-[10px] sm:text-xs col-span-3 sm:col-span-2 md:col-span-2">
                   Fast Search
                   <input
-                    className="input mt-1 h-11"
+                    className="input mt-0.5 h-7 sm:mt-1 sm:h-11 px-1.5 text-[10px] sm:text-sm"
                     type="text"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
@@ -883,17 +1016,17 @@ export default function PropertySummaryPage() {
                   />
                 </label>
 
-                <label className="block text-xs">
-                  Best Deal Basis
-                  <select className="input mt-1 h-11" value={bestBy} onChange={(e) => setBestBy(e.target.value as BestByMode)}>
+                <label className="block text-[10px] sm:text-xs">
+                  Best
+                  <select className="input mt-0.5 h-7 sm:mt-1 sm:h-11 px-1.5 text-[10px] sm:text-sm" value={bestBy} onChange={(e) => setBestBy(e.target.value as BestByMode)}>
                     <option value="price">Lowest total price</option>
                     <option value="perSqm">Lowest price / sqm</option>
                   </select>
                 </label>
 
-                <label className="block text-xs">
+                <label className="block text-[10px] sm:text-xs">
                   Sort
-                  <select className="input mt-1 h-11" value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
+                  <select className="input mt-0.5 h-7 sm:mt-1 sm:h-11 px-1.5 text-[10px] sm:text-sm" value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
                     <option value="project">Project A-Z</option>
                     <option value="price">Lowest Price</option>
                     <option value="perSqm">Lowest / sqm</option>
@@ -903,7 +1036,7 @@ export default function PropertySummaryPage() {
                 </label>
 
                 <button
-                  className={`btn h-11 ${filtersOpen ? "btn-outline" : "btn-ghost"}`}
+                  className={`btn h-7 sm:h-11 px-1 text-[10px] sm:px-2 sm:text-sm ${filtersOpen ? "btn-outline" : "btn-ghost"}`}
                   onClick={() => setFiltersOpen((prev) => !prev)}
                 >
                   {filtersOpen ? "Hide Filters" : `Filters ${activeFilterCount ? `(${activeFilterCount})` : ""}`}
@@ -911,18 +1044,18 @@ export default function PropertySummaryPage() {
               </div>
 
               {filtersOpen && (
-                <div className="space-y-4 rounded-2xl border bg-slate-50 p-4">
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div className="space-y-2 sm:space-y-4 rounded-xl sm:rounded-2xl border bg-slate-50 p-2 sm:p-4">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-3">
                     <div>
-                      <div className="text-sm font-semibold">Filters</div>
-                      <div className="text-xs text-muted-foreground">Hidden by default to keep the page clean.</div>
+                      <div className="text-xs sm:text-sm font-semibold">Filters</div>
+                      <div className="hidden sm:block text-xs text-muted-foreground">Hidden by default to keep the page clean.</div>
                     </div>
-                    <button className="btn btn-outline btn-sm" onClick={resetFilters}>Reset all filters</button>
+                    <button className="btn btn-outline btn-sm h-7 px-2 text-[11px] sm:h-8 sm:text-xs" onClick={resetFilters}>Reset all</button>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-1.5 sm:space-y-2">
                     <FilterGroupHeader title="Unit Type" onClear={() => setSelectedTypes([])} hasValue={selectedTypes.length > 0} />
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-1 sm:gap-2">
                       {availableTypes.map((t) => (
                         <PillButton key={t} active={selectedTypes.includes(t)} onClick={() => setSelectedTypes((prev) => toggleValue(prev, t))}>
                           {t}
@@ -931,10 +1064,10 @@ export default function PropertySummaryPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div className="space-y-2">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-4">
+                    <div className="space-y-1.5 sm:space-y-2">
                       <FilterGroupHeader title="Facing" onClear={() => setSelectedFacings([])} hasValue={selectedFacings.length > 0} />
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-1 sm:gap-2">
                         {availableFacings.map((f) => (
                           <PillButton key={f} active={selectedFacings.includes(f)} onClick={() => setSelectedFacings((prev) => toggleValue(prev, f))}>
                             {f}
@@ -944,15 +1077,15 @@ export default function PropertySummaryPage() {
                       </div>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 sm:space-y-2">
                       <FilterGroupHeader title="Floor" onClear={() => setFloorRange(DEFAULT_FLOOR_RANGE)} hasValue={floorRange[0] !== DEFAULT_FLOOR_RANGE[0] || floorRange[1] !== DEFAULT_FLOOR_RANGE[1]} />
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-1 sm:gap-2">
                         <PillButton active={floorRange[0] === 0 && floorRange[1] === 80} onClick={() => setFloorPreset("all")}>All floors</PillButton>
                         <PillButton active={floorRange[0] === 0 && floorRange[1] === 10} onClick={() => setFloorPreset("low")}>Low 0–10F</PillButton>
                         <PillButton active={floorRange[0] === 11 && floorRange[1] === 20} onClick={() => setFloorPreset("mid")}>Mid 11–20F</PillButton>
                         <PillButton active={floorRange[0] === 21 && floorRange[1] === 80} onClick={() => setFloorPreset("high")}>High 21F+</PillButton>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
                         <input
                           className="input"
                           type="number"
@@ -979,7 +1112,7 @@ export default function PropertySummaryPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-1.5 sm:space-y-2">
                     <FilterGroupHeader title={`Size ${hasValidSizeBounds ? `(${sizeRange[0]} – ${sizeRange[1]} sqm)` : ""}`} onClear={() => setSizeFilterActive(false)} hasValue={sizeFilterActive} />
                     {hasValidSizeBounds ? (
                       <>
@@ -1006,7 +1139,7 @@ export default function PropertySummaryPage() {
                             return <div key={key} {...rest} className="h-4 w-4 rounded-full bg-[color:var(--primary)] shadow" aria-label="sqm handle" />;
                           }}
                         />
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-1 sm:gap-2">
                           <input
                             className="input w-24"
                             type="number"
@@ -1043,24 +1176,24 @@ export default function PropertySummaryPage() {
                     )}
                   </div>
 
-                  <div className="rounded-2xl border bg-white">
+                  <div className="rounded-xl sm:rounded-2xl border bg-white">
                     <button
-                      className="flex w-full items-center justify-between px-4 py-3 text-left"
+                      className="flex w-full items-center justify-between px-3 py-2 sm:px-4 sm:py-3 text-left"
                       onClick={() => setAdvancedOpen((prev) => !prev)}
                     >
                       <div>
-                        <div className="text-sm font-semibold">More Filters</div>
-                        <div className="text-xs text-muted-foreground">City, amenities, status, and budget</div>
+                        <div className="text-xs sm:text-sm font-semibold">More Filters</div>
+                        <div className="hidden sm:block text-xs text-muted-foreground">City, amenities, status, and budget</div>
                       </div>
-                      <span className="text-sm text-muted-foreground">{advancedOpen ? "Hide" : "Show"}</span>
+                      <span className="text-[11px] sm:text-sm text-muted-foreground">{advancedOpen ? "Hide" : "Show"}</span>
                     </button>
 
                     {advancedOpen && (
-                      <div className="border-t p-4 space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <label className="block text-xs">
+                      <div className="border-t p-2 sm:p-4 space-y-2 sm:space-y-4">
+                        <div className="grid grid-cols-2 md:grid-cols-2 gap-2 sm:gap-4">
+                          <label className="block text-[11px] sm:text-xs">
                             Status
-                            <select className="input mt-1" value={statusMode} onChange={(e) => setStatusMode(e.target.value as StatusMode)}>
+                            <select className="input mt-0.5 h-8 text-[11px] sm:mt-1 sm:h-10 sm:text-sm" value={statusMode} onChange={(e) => setStatusMode(e.target.value as StatusMode)}>
                               <option value="available">Available only</option>
                               <option value="available_hold">Available + On Hold</option>
                               <option value="hold">On Hold only</option>
@@ -1068,10 +1201,10 @@ export default function PropertySummaryPage() {
                             </select>
                           </label>
 
-                          <label className="block text-xs">
+                          <label className="block text-[11px] sm:text-xs">
                             Max Budget
                             <input
-                              className="input mt-1"
+                              className="input mt-0.5 h-8 text-[11px] sm:mt-1 sm:h-10 sm:text-sm"
                               type="number"
                               value={maxBudget}
                               onChange={(e) => setMaxBudget(e.target.value)}
@@ -1080,9 +1213,9 @@ export default function PropertySummaryPage() {
                           </label>
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="space-y-1.5 sm:space-y-2">
                           <FilterGroupHeader title="City" onClear={() => setSelectedCities([])} hasValue={selectedCities.length > 0} />
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-wrap gap-1 sm:gap-2">
                             {availableCities.map((c) => (
                               <PillButton key={c} active={selectedCities.includes(c)} onClick={() => setSelectedCities((prev) => toggleValue(prev, c))}>
                                 {c}
@@ -1091,9 +1224,9 @@ export default function PropertySummaryPage() {
                           </div>
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="space-y-1.5 sm:space-y-2">
                           <FilterGroupHeader title="Amenities" onClear={() => setSelectedAmenities([])} hasValue={selectedAmenities.length > 0} />
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-wrap gap-1 sm:gap-2">
                             {availableAmenities.map((a) => (
                               <PillButton key={a} active={selectedAmenities.includes(a)} onClick={() => setSelectedAmenities((prev) => toggleValue(prev, a))}>
                                 {a}
@@ -1108,7 +1241,7 @@ export default function PropertySummaryPage() {
               )}
 
               {activeFilterCount > 0 && (
-                <div className="flex flex-wrap gap-2 border-t pt-3 text-xs">
+                <div className="flex flex-wrap gap-1 border-t pt-2 sm:gap-2 sm:pt-3 text-[10px] sm:text-xs">
                   {selectedProjectCodes.map((code) => {
                     const label = allProjectNavItems.find((p) => p.property_code === code)?.property_name || code;
                     return <FilterChip key={code} label={`Project: ${label}`} onClear={() => setSelectedProjectCodes((prev) => clearValues(prev, code))} />;
@@ -1127,26 +1260,26 @@ export default function PropertySummaryPage() {
                 </div>
               )}
 
-              <div className="rounded-2xl border bg-white">
+              <div className="rounded-xl sm:rounded-2xl border bg-white">
                 <button
-                  className="flex w-full items-center justify-between px-4 py-3 text-left"
+                  className="flex w-full items-center justify-between px-3 py-2 sm:px-4 sm:py-3 text-left"
                   onClick={() => setCalcOpen((prev) => !prev)}
                 >
                   <div>
-                    <div className="text-sm font-semibold">Quick Computation Assumptions</div>
-                    <div className="text-xs text-muted-foreground">Hidden by default</div>
+                    <div className="text-xs sm:text-sm font-semibold">Quick Computation Assumptions</div>
+                    <div className="hidden sm:block text-xs text-muted-foreground">Hidden by default</div>
                   </div>
-                  <span className="text-sm text-muted-foreground">{calcOpen ? "Hide" : "Show"}</span>
+                  <span className="text-[11px] sm:text-sm text-muted-foreground">{calcOpen ? "Hide" : "Show"}</span>
                 </button>
 
                 {calcOpen && (
-                  <div className="border-t p-4 grid grid-cols-2 md:grid-cols-6 gap-3 text-sm">
+                  <div className="border-t p-2 sm:p-4 grid grid-cols-3 md:grid-cols-6 gap-1.5 sm:gap-3 text-[11px] sm:text-sm">
                     <NumberInput label="Discount %" value={discountPct} step={0.1} onChange={setDiscountPct} />
                     <NumberInput label="DP %" value={downPct} step={0.1} onChange={setDownPct} />
                     <NumberInput label="Months" value={monthsToPay} step={1} min={1} onChange={(v) => setMonthsToPay(Math.max(1, Math.floor(v)))} />
                     <NumberInput label="Reservation" value={reservationFee} step={1000} min={0} onChange={(v) => setReservationFee(Math.max(0, Math.floor(v)))} />
                     <NumberInput label="Closing %" value={closingFeePct} step={0.1} onChange={setClosingFeePct} />
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-1.5 sm:gap-3">
                       <NumberInput label="15 yrs %" value={rate15yr} step={0.1} onChange={setRate15yr} />
                       <NumberInput label="20 yrs %" value={rate20yr} step={0.1} onChange={setRate20yr} />
                     </div>
@@ -1155,155 +1288,153 @@ export default function PropertySummaryPage() {
               </div>
             </div>
 
-            {loading && <div className="card p-8">Loading…</div>}
-            {error && <div className="card p-8 text-red-600">{error}</div>}
+            {loading && <div className="card p-4 sm:p-8">Loading…</div>}
+            {error && <div className="card p-4 sm:p-8 text-red-600">{error}</div>}
 
             {!loading && !error && byProperty.length === 0 && (
-              <div className="card p-8 text-muted-foreground">
+              <div className="card p-4 sm:p-8 text-muted-foreground">
                 No results match your filters. Try clearing size/floor/budget filters or selecting another project.
               </div>
             )}
 
             {!loading && !error && byProperty.length > 0 && (
-              <div className="space-y-6">
+              <div className="space-y-3 sm:space-y-6">
                 {byProperty.map((group) => {
                   const lowestGroupPrice = Math.min(...group.rows.map((r) => r.bestPrice || Number.POSITIVE_INFINITY));
                   const lowestGroupPerSqm = Math.min(...group.rows.map((r) => r.bestPerSqm || Number.POSITIVE_INFINITY));
 
                   return (
                     <section key={group.header.code} className="card p-0 overflow-hidden">
-                      <div className="bg-[#0f172a] text-white px-4 py-3">
+                      <div className="bg-[#0f172a] text-white px-3 py-2 sm:px-4 sm:py-3">
                         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1">
                           <div>
-                            <div className="text-lg font-semibold">{group.header.name}</div>
-                            <div className="text-xs opacity-90">
+                            <div className="text-sm sm:text-lg font-semibold leading-tight">{group.header.name}</div>
+                            <div className="text-[10px] sm:text-xs opacity-90">
                               {group.header.city}
                               {group.header.address ? ` • ${group.header.address}` : ""}
                             </div>
                           </div>
-                          <div className="text-xs opacity-90">
+                          <div className="text-[10px] sm:text-xs opacity-90">
                             {group.rows.length} lowest rows • Cheapest {fmtPhp(lowestGroupPrice)} • {fmtPhp(lowestGroupPerSqm)}/sqm
                           </div>
                         </div>
                       </div>
 
-                      <div className="divide-y bg-white">
+                      <div className="space-y-2 bg-[#f3f6fb] p-1.5 sm:space-y-4 sm:bg-[#f6f8fb] sm:p-3">
                         {group.towerGroups.map((tower) => (
-                          <div key={tower.towerKey} className="bg-white">
-                            <div className="grid grid-cols-1 xl:grid-cols-[220px_1fr] border-l-4 border-blue-200">
-                              <div className="bg-slate-50 px-4 py-4 xl:border-r">
-                                <div className="text-xs uppercase tracking-wide text-slate-500">Building</div>
-                                <div className="font-semibold text-slate-900">{tower.towerName}</div>
-                                <div className="mt-2 text-xs text-muted-foreground">
-                                  {tower.rows.length} row{tower.rows.length === 1 ? "" : "s"}
-                                  <br />
-                                  Lowest: <span className="font-medium text-slate-700">{fmtPhp(tower.lowestPrice)}</span>
-                                  <br />
-                                  Best / sqm: <span className="font-medium text-slate-700">{fmtPhp(tower.lowestPerSqm)}/sqm</span>
+                          <div key={tower.towerKey} className="overflow-hidden rounded-lg border border-[#dbe4ef] bg-white shadow-sm sm:rounded-2xl sm:border-[#dbe4ef] sm:shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                            <div className="grid grid-cols-1 xl:grid-cols-[210px_1fr] border-l-4 border-[#b8c7dc]">
+                              <div className="bg-[#f8fafc] px-2 py-1.5 sm:px-4 sm:py-4 xl:border-r xl:border-[#dbe4ef]">
+                                <div className="flex items-center justify-between gap-2 xl:block">
+                                  <div className="min-w-0">
+                                    <div className="text-[8px] sm:text-xs uppercase tracking-wide text-[#64748b]">Building</div>
+                                    <div className="truncate text-[12px] font-bold leading-tight text-slate-900 sm:text-base">{tower.towerName}</div>
+                                  </div>
+                                  <div className="shrink-0 text-right text-[9px] leading-tight text-slate-600 sm:mt-2 sm:text-left sm:text-xs">
+                                    <div>{tower.rows.length} row{tower.rows.length === 1 ? "" : "s"}</div>
+                                    <div>Low <span className="font-semibold text-slate-800">{fmtCompactPhp(tower.lowestPrice)}</span></div>
+                                    <div>₱/sqm <span className="font-semibold text-emerald-700">{fmtCompactPhp(tower.lowestPerSqm)}</span></div>
+                                  </div>
                                 </div>
                               </div>
 
-                              <div className="xl:hidden divide-y">
-                                {tower.rows.map((deal) => {
-                                  const u = deal.bestUnit;
-                                  const rowOpen = openRowKey === deal.key;
-                                  const computeOpen = openComputeKey === deal.key;
-                                  const id = getDealId(u);
-                                  const c = computeSample(deal.bestPrice);
+                              <div className="xl:hidden text-[10px]">
+                                <div className="grid grid-cols-[44px_minmax(0,1.05fr)_minmax(0,0.9fr)_48px_22px] items-center gap-1 border-b border-[#d9e2ef] bg-[#f4f7fb] px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#64748b]">
+                                  <span>Type</span>
+                                  <span className="text-right">Price</span>
+                                  <span className="text-right">₱/sqm</span>
+                                  <span className="text-center">Flr/Face</span>
+                                  <span className="text-right">+</span>
+                                </div>
 
-                                  return (
-                                    <div key={deal.key} className={rowOpen ? "bg-blue-50/40" : "bg-white"}>
-                                      <button
-                                        className="w-full px-4 py-4 text-left"
-                                        onClick={() => setOpenRowKey(rowOpen ? null : deal.key)}
-                                      >
-                                        <div className="flex items-start justify-between gap-3">
-                                          <div className="min-w-0">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                              <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">{deal.type}</span>
-                                              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">{deal.sizeLabel}</span>
-                                              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">{parseFloorNumber(u.Floor)}F</span>
-                                            </div>
-                                            <div className="mt-3 text-xl font-semibold">{fmtPhp(deal.bestPrice)}</div>
-                                            <div className="text-sm font-medium text-emerald-700">{fmtPhp(deal.bestPerSqm)}/sqm</div>
-                                            <div className="mt-1 text-xs text-muted-foreground">
-                                              {u.BuildingUnit} • {u.Facing || "No facing"} • {deal.optionCount} option{deal.optionCount === 1 ? "" : "s"}
-                                            </div>
-                                          </div>
-                                          <span className="shrink-0 text-sm font-medium text-blue-700">{rowOpen ? "Hide" : "View"}</span>
-                                        </div>
-                                      </button>
+                                <div className="divide-y">
+                                  {tower.rows.map((deal) => {
+                                    const u = deal.bestUnit;
+                                    const rowOpen = openRowKey === deal.key;
+                                    const computeOpen = openComputeKey === deal.key;
+                                    const id = getDealId(u);
+                                    const c = computeSample(deal.bestPrice);
 
-                                      {rowOpen && (
-                                        <div className="border-t bg-blue-50/30 px-4 py-4">
-                                          <div className="rounded-xl border bg-white p-4">
-                                            <div className="mb-3 text-sm font-semibold">Unit Details</div>
-                                            <div className="grid grid-cols-2 gap-3 text-sm">
-                                              <DetailCell label="Project" value={deal.property_name} />
-                                              <DetailCell label="Building" value={tower.towerName} />
-                                              <DetailCell label="Unit" value={u.BuildingUnit} />
-                                              <DetailCell label="Status" value={u.Status || "—"} />
-                                              <DetailCell label="Type" value={deal.type} />
-                                              <DetailCell label="Size" value={deal.sizeLabel} />
-                                              <DetailCell label="Floor" value={`${parseFloorNumber(u.Floor)}F`} />
-                                              <DetailCell label="RFO" value={u.RFODate || "TBA"} />
-                                              <DetailCell label="Amenities" value={u.Amenities || "—"} />
-                                              <DetailCell label="Facing" value={u.Facing || "—"} />
-                                              <DetailCell label="Lowest Price" value={fmtPhp(deal.bestPrice)} />
-                                              <DetailCell label="Price / sqm" value={`${fmtPhp(deal.bestPerSqm)}/sqm`} />
-                                            </div>
+                                    return (
+                                      <div key={deal.key} className={rowOpen ? "bg-[#f4f7fb]" : "bg-white"}>
+                                        <button
+                                          className="grid w-full grid-cols-[44px_minmax(0,1.05fr)_minmax(0,0.9fr)_48px_22px] items-center gap-1 px-2 py-1.5 text-left hover:bg-[#f8fafc]"
+                                          onClick={() => setOpenRowKey(rowOpen ? null : deal.key)}
+                                        >
+                                          <span className="min-w-0 rounded-md border border-[#d9e2ef] bg-[#f8fafc] px-1 py-0.5">
+                                            <span className="block truncate text-[10px] font-bold leading-tight text-[#243b53]">{deal.type}</span>
+                                            <span className="block truncate text-[8px] leading-tight text-slate-500">{deal.sizeLabel.replace(" sqm", "")}</span>
+                                          </span>
+                                          <span className="truncate text-right text-[11px] font-bold text-slate-950">{fmtCompactPhp(deal.bestPrice)}</span>
+                                          <span className="truncate text-right text-[10px] font-semibold text-emerald-700">{fmtCompactPhp(deal.bestPerSqm)}</span>
+                                          <span className="text-center text-[8px] leading-tight text-slate-600">
+                                            <span className="block font-semibold text-slate-800">{parseFloorNumber(u.Floor)}F</span>
+                                            <span className="block truncate">{u.Facing || "—"}</span>
+                                          </span>
+                                          <span className={`text-right text-[12px] font-bold ${rowOpen ? "text-slate-500" : "text-[#64748b]"}`}>{rowOpen ? "–" : "+"}</span>
+                                        </button>
 
-                                            <div className="mt-4 grid grid-cols-1 gap-2">
-                                              <Link className="btn btn-outline btn-sm w-full" href={`/computation/${encodeURIComponent(id)}`}>
-                                                Full computation
-                                              </Link>
-                                              <button
-                                                className="btn btn-ghost btn-sm w-full"
-                                                onClick={() => setOpenComputeKey(computeOpen ? null : deal.key)}
-                                              >
-                                                {computeOpen ? "Hide quick sample" : "Show quick sample"}
-                                              </button>
-                                            </div>
-                                          </div>
+                                        {rowOpen && (
+                                          <div className="border-t border-[#d9e2ef] bg-[#f4f7fb] px-1.5 py-2">
+                                            <div className="rounded-md border border-[#d9e2ef] bg-white p-2">
+                                              <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+                                                <DetailCell label="Unit" value={u.BuildingUnit} />
+                                                <DetailCell label="Status" value={u.Status || "—"} />
+                                                <DetailCell label="RFO" value={u.RFODate || "TBA"} />
+                                                <DetailCell label="Bldg" value={tower.towerName} />
+                                                <DetailCell label="Amenity" value={u.Amenities || "—"} />
+                                                <DetailCell label="Options" value={String(deal.optionCount)} />
+                                              </div>
 
-                                          {computeOpen && (
-                                            <div className="mt-3 rounded-xl border bg-white p-4 text-sm">
-                                              <div className="mb-3 font-semibold">Quick Sample Computation</div>
-                                              <div className="grid grid-cols-2 gap-3">
-                                                <ComputeCell label={`TCP (disc ${discountPct}%)`} value={fmtPhp(c.TCP)} />
-                                                <ComputeCell label={`DP ${downPct}%`} value={fmtPhp(c.dpAmount)} />
-                                                <ComputeCell label="Reservation" value={fmtPhp(reservationFee)} />
-                                                <ComputeCell label={`Net DP / ${monthsToPay} mos`} value={fmtPhp(c.dpMonthly)} />
-                                                <ComputeCell label={`Closing Fee ${closingFeePct}%`} value={fmtPhp(c.closingFee)} />
-                                                <ComputeCell label="Balance" value={fmtPhp(c.bankBalance)} />
-                                                <ComputeCell label={`15 yrs @ ${rate15yr}%`} value={fmtPhp(c.monthly15)} />
-                                                <ComputeCell label={`20 yrs @ ${rate20yr}%`} value={fmtPhp(c.monthly20)} />
+                                              <div className="mt-2 grid grid-cols-2 gap-1.5">
+                                                <Link className="btn btn-outline btn-sm h-7 w-full px-1 text-[10px]" href={`/computation/${encodeURIComponent(id)}`}>
+                                                  Full computation
+                                                </Link>
+                                                <button
+                                                  className="btn btn-ghost btn-sm h-7 w-full px-1 text-[10px]"
+                                                  onClick={() => setOpenComputeKey(computeOpen ? null : deal.key)}
+                                                >
+                                                  {computeOpen ? "Hide sample" : "Quick sample"}
+                                                </button>
                                               </div>
                                             </div>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
+
+                                            {computeOpen && (
+                                              <div className="mt-1.5 rounded-md border border-[#d9e2ef] bg-white p-2 text-[10px]">
+                                                <div className="grid grid-cols-2 gap-1.5">
+                                                  <ComputeCell label={`TCP`} value={fmtCompactPhp(c.TCP)} />
+                                                  <ComputeCell label={`DP ${downPct}%`} value={fmtCompactPhp(c.dpAmount)} />
+                                                  <ComputeCell label="Monthly DP" value={fmtCompactPhp(c.dpMonthly)} />
+                                                  <ComputeCell label="Balance" value={fmtCompactPhp(c.bankBalance)} />
+                                                  <ComputeCell label="15 yrs" value={fmtCompactPhp(c.monthly15)} />
+                                                  <ComputeCell label="20 yrs" value={fmtCompactPhp(c.monthly20)} />
+                                                </div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
 
-                              <div className="hidden xl:block overflow-x-auto">
-                                <table className="w-full min-w-[920px] text-sm">
-                                  <thead className="bg-slate-50 text-xs text-slate-500">
+                              <div className="hidden xl:block overflow-hidden bg-white">
+                                <table className="w-full table-fixed text-xs">
+                                  <thead className="border-b border-[#d9e2ef] bg-[#f4f7fb] text-[10px] uppercase tracking-[0.06em] text-[#243b53]">
                                     <tr>
-                                      <th className="px-3 py-2 text-left font-medium">Type</th>
-                                      <th className="px-3 py-2 text-left font-medium">Size</th>
-                                      <th className="px-3 py-2 text-right font-medium">Lowest Price</th>
-                                      <th className="px-3 py-2 text-right font-medium">Price / sqm</th>
-                                      <th className="px-3 py-2 text-left font-medium">Unit</th>
-                                      <th className="px-3 py-2 text-center font-medium">Floor</th>
-                                      <th className="px-3 py-2 text-left font-medium">Facing</th>
-                                      <th className="px-3 py-2 text-center font-medium">Options</th>
-                                      <th className="px-3 py-2 text-right font-medium">Action</th>
+                                      <th className="w-[6%] px-2 py-2 text-left font-bold">Type</th>
+                                      <th className="w-[8%] px-2 py-2 text-left font-bold">Size</th>
+                                      <th className="w-[14%] px-2 py-2 text-right font-bold">Price</th>
+                                      <th className="w-[14%] px-2 py-2 text-right font-bold">₱/sqm</th>
+                                      <th className="w-[17%] px-2 py-2 text-left font-bold">Unit</th>
+                                      <th className="w-[7%] px-2 py-2 text-center font-bold">Floor</th>
+                                      <th className="w-[13%] px-2 py-2 text-left font-bold">Facing</th>
+                                      <th className="w-[7%] px-2 py-2 text-center font-bold">Opt.</th>
+                                      <th className="w-[14%] px-2 py-2 text-right font-bold">View</th>
                                     </tr>
                                   </thead>
-                                  <tbody className="divide-y">
+                                  <tbody className="divide-y divide-slate-100">
                                     {tower.rows.map((deal) => {
                                       const u = deal.bestUnit;
                                       const rowOpen = openRowKey === deal.key;
@@ -1312,33 +1443,58 @@ export default function PropertySummaryPage() {
                                       const c = computeSample(deal.bestPrice);
 
                                       return (
-                                        <tr key={deal.key} className={rowOpen ? "bg-blue-50/40" : "hover:bg-slate-50"}>
-                                          <td colSpan={9} className="p-0">
-                                            <button
-                                              className="grid w-full grid-cols-[90px_90px_150px_150px_150px_80px_120px_80px_120px] items-center gap-0 px-0 text-left"
-                                              onClick={() => setOpenRowKey(rowOpen ? null : deal.key)}
-                                            >
-                                              <span className="px-3 py-3">
-                                                <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">{deal.type}</span>
+                                        <Fragment key={deal.key}>
+                                          <tr
+                                            className={`cursor-pointer ${rowOpen ? "bg-[#f4f7fb]" : "bg-white hover:bg-[#f8fafc]"}`}
+                                            onClick={() => setOpenRowKey(rowOpen ? null : deal.key)}
+                                          >
+                                            <td className="w-[6%] px-2 py-2.5 align-middle">
+                                              <span className="inline-flex rounded-full border border-[#d9e2ef] bg-[#f8fafc] px-2 py-0.5 text-[11px] font-bold text-[#243b53]">
+                                                {deal.type}
                                               </span>
-                                              <span className="px-3 py-3 font-medium">{deal.sizeLabel}</span>
-                                              <span className="px-3 py-3 text-right font-semibold">{fmtPhp(deal.bestPrice)}</span>
-                                              <span className="px-3 py-3 text-right font-medium text-emerald-700">{fmtPhp(deal.bestPerSqm)}/sqm</span>
-                                              <span className="px-3 py-3 truncate text-muted-foreground">{u.BuildingUnit}</span>
-                                              <span className="px-3 py-3 text-center">{parseFloorNumber(u.Floor)}F</span>
-                                              <span className="px-3 py-3 truncate">{u.Facing || "—"}</span>
-                                              <span className="px-3 py-3 text-center text-muted-foreground">{deal.optionCount}</span>
-                                              <span className="px-3 py-3 text-right text-blue-700 font-medium">
+                                            </td>
+                                            <td className="w-[8%] px-2 py-2.5 align-middle font-semibold text-slate-800">
+                                              {deal.sizeLabel}
+                                            </td>
+                                            <td className="w-[14%] px-2 py-2.5 text-right align-middle font-bold text-slate-950">
+                                              {fmtPhp(deal.bestPrice)}
+                                            </td>
+                                            <td className="w-[14%] px-2 py-2.5 text-right align-middle font-semibold text-emerald-700">
+                                              {fmtPhp(deal.bestPerSqm)}/sqm
+                                            </td>
+                                            <td className="w-[17%] truncate px-2 py-2.5 align-middle text-slate-600">
+                                              {u.BuildingUnit}
+                                            </td>
+                                            <td className="w-[7%] px-2 py-2.5 text-center align-middle font-medium text-slate-700">
+                                              {parseFloorNumber(u.Floor)}F
+                                            </td>
+                                            <td className="w-[13%] truncate px-2 py-2.5 align-middle text-slate-700">
+                                              {u.Facing || "—"}
+                                            </td>
+                                            <td className="w-[7%] px-2 py-2.5 text-center align-middle text-slate-500">
+                                              {deal.optionCount}
+                                            </td>
+                                            <td className="w-[14%] px-2 py-2.5 text-right align-middle">
+                                              <button
+                                                type="button"
+                                                className="font-semibold text-[#64748b] hover:text-[#0f172a]"
+                                                onClick={(event) => {
+                                                  event.stopPropagation();
+                                                  setOpenRowKey(rowOpen ? null : deal.key);
+                                                }}
+                                              >
                                                 {rowOpen ? "Hide" : "View"}
-                                              </span>
-                                            </button>
+                                              </button>
+                                            </td>
+                                          </tr>
 
-                                            {rowOpen && (
-                                              <div className="border-t bg-blue-50/30 px-4 py-4">
-                                                <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-4">
-                                                  <div className="rounded-xl border bg-white p-4">
-                                                    <div className="mb-3 text-sm font-semibold">Unit Details</div>
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                          {rowOpen && (
+                                            <tr className="bg-[#f4f7fb]">
+                                              <td colSpan={9} className="border-t border-[#d9e2ef] px-2.5 py-2.5 sm:px-4 sm:py-4">
+                                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_240px]">
+                                                  <div className="rounded-lg border bg-white p-3">
+                                                    <div className="mb-2 text-sm font-semibold">Unit Details</div>
+                                                    <div className="grid grid-cols-2 gap-3 text-xs md:grid-cols-4">
                                                       <DetailCell label="Project" value={deal.property_name} />
                                                       <DetailCell label="Building" value={tower.towerName} />
                                                       <DetailCell label="Unit" value={u.BuildingUnit} />
@@ -1354,7 +1510,7 @@ export default function PropertySummaryPage() {
                                                     </div>
                                                   </div>
 
-                                                  <div className="rounded-xl border bg-white p-4 space-y-3">
+                                                  <div className="rounded-xl border border-[#d9e2ef] bg-white p-3 space-y-2">
                                                     <Link className="btn btn-outline btn-sm w-full" href={`/computation/${encodeURIComponent(id)}`}>
                                                       Full computation
                                                     </Link>
@@ -1368,9 +1524,9 @@ export default function PropertySummaryPage() {
                                                 </div>
 
                                                 {computeOpen && (
-                                                  <div className="mt-4 rounded-xl border bg-white p-4 text-sm">
-                                                    <div className="mb-3 font-semibold">Quick Sample Computation</div>
-                                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                  <div className="mt-3 rounded-xl border border-[#d9e2ef] bg-white p-3 text-sm">
+                                                    <div className="mb-2 font-semibold">Quick Sample Computation</div>
+                                                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                                                       <ComputeCell label={`TCP (disc ${discountPct}%)`} value={fmtPhp(c.TCP)} />
                                                       <ComputeCell label={`DP ${downPct}%`} value={fmtPhp(c.dpAmount)} />
                                                       <ComputeCell label="Reservation" value={fmtPhp(reservationFee)} />
@@ -1382,10 +1538,10 @@ export default function PropertySummaryPage() {
                                                     </div>
                                                   </div>
                                                 )}
-                                              </div>
-                                            )}
-                                          </td>
-                                        </tr>
+                                              </td>
+                                            </tr>
+                                          )}
+                                        </Fragment>
                                       );
                                     })}
                                   </tbody>
@@ -1409,9 +1565,9 @@ export default function PropertySummaryPage() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="card px-4 py-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-lg md:text-xl font-semibold truncate">{value}</div>
+    <div className="card px-1.5 py-1 sm:px-4 sm:py-3">
+      <div className="truncate text-[8px] sm:text-xs text-muted-foreground">{label}</div>
+      <div className="truncate text-[10px] sm:text-lg md:text-xl font-semibold">{value}</div>
     </div>
   );
 }
@@ -1420,7 +1576,7 @@ function PillButton({ active, onClick, children }: { active: boolean; onClick: (
   return (
     <button
       type="button"
-      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+      className={`rounded-full border px-2 py-1 text-[10px] sm:px-3 sm:py-1.5 sm:text-xs font-medium transition ${
         active
           ? "bg-[color:var(--primary)] text-white border-[color:var(--primary)] shadow-sm"
           : "bg-white hover:bg-slate-50 border-slate-200 text-slate-700"
@@ -1436,9 +1592,9 @@ function PillButton({ active, onClick, children }: { active: boolean; onClick: (
 function FilterGroupHeader({ title, hasValue, onClear }: { title: string; hasValue: boolean; onClear: () => void }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <div className="text-xs font-semibold text-slate-700">{title}</div>
+      <div className="text-[10px] sm:text-xs font-semibold text-slate-700">{title}</div>
       {hasValue && (
-        <button className="text-xs text-blue-700 hover:underline" onClick={onClear}>
+        <button className="text-[10px] sm:text-xs text-blue-700 hover:underline" onClick={onClear}>
           Clear
         </button>
       )}
@@ -1450,7 +1606,7 @@ function FilterChip({ label, onClear }: { label: string; onClear: () => void }) 
   return (
     <button
       type="button"
-      className="rounded-full border bg-white px-3 py-1 text-xs hover:bg-slate-50"
+      className="rounded-full border bg-white px-2 py-0.5 text-[10px] hover:bg-slate-50 sm:px-3 sm:py-1 sm:text-xs"
       onClick={onClear}
       title="Clear filter"
     >
@@ -1473,10 +1629,10 @@ function NumberInput({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="block text-xs">
+    <label className="block text-[10px] sm:text-xs">
       {label}
       <input
-        className="input mt-1"
+        className="input mt-0.5 h-8 text-[11px] sm:mt-1 sm:h-10 sm:text-sm"
         type="number"
         step={step}
         min={min}
@@ -1490,8 +1646,8 @@ function NumberInput({
 function DetailCell({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="font-medium truncate">{value}</div>
+      <div className="text-[8px] sm:text-xs text-muted-foreground">{label}</div>
+      <div className="truncate text-[10px] sm:text-sm font-medium">{value}</div>
     </div>
   );
 }
@@ -1499,8 +1655,8 @@ function DetailCell({ label, value }: { label: string; value: string }) {
 function ComputeCell({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="font-semibold">{value}</div>
+      <div className="text-[8px] sm:text-xs text-muted-foreground">{label}</div>
+      <div className="text-[10px] sm:text-sm font-semibold">{value}</div>
     </div>
   );
 }
