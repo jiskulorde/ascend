@@ -208,6 +208,7 @@ export default function PropertySummaryPage() {
   const [bestBy, setBestBy] = useState<BestByMode>("price");
 
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [mobileProjectOpen, setMobileProjectOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [calcOpen, setCalcOpen] = useState(false);
 
@@ -745,14 +746,25 @@ export default function PropertySummaryPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-5 items-start">
           <aside className="card p-0 overflow-hidden lg:sticky lg:top-24">
             <div className="bg-[#0f172a] text-white px-4 py-4">
-              <div className="text-xs uppercase tracking-wide opacity-70">Inventory Navigation</div>
-              <div className="text-lg font-semibold">All Projects</div>
-              <div className="text-xs opacity-80 mt-1">
-                Multi-select projects • {allProjectNavItems.length} total
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs uppercase tracking-wide opacity-70">Inventory Navigation</div>
+                  <div className="text-lg font-semibold">All Projects</div>
+                  <div className="text-xs opacity-80 mt-1">
+                    Multi-select projects • {allProjectNavItems.length} total
+                  </div>
+                </div>
+                <button
+                  className="lg:hidden rounded-lg bg-white/10 px-3 py-2 text-xs font-medium hover:bg-white/20"
+                  onClick={() => setMobileProjectOpen((prev) => !prev)}
+                >
+                  {mobileProjectOpen ? "Hide" : "Show"}
+                </button>
               </div>
             </div>
 
-            <div className="p-3 border-b bg-white space-y-3">
+            <div className={`${mobileProjectOpen ? "block" : "hidden"} lg:block`}>
+              <div className="p-3 border-b bg-white space-y-3">
               <input
                 className="input"
                 type="text"
@@ -826,6 +838,7 @@ export default function PropertySummaryPage() {
               {projectNavItems.length === 0 && (
                 <div className="p-4 text-sm text-muted-foreground">No project name matches your sidebar search.</div>
               )}
+            </div>
             </div>
           </aside>
 
@@ -1190,7 +1203,92 @@ export default function PropertySummaryPage() {
                                 </div>
                               </div>
 
-                              <div className="overflow-x-auto">
+                              <div className="xl:hidden divide-y">
+                                {tower.rows.map((deal) => {
+                                  const u = deal.bestUnit;
+                                  const rowOpen = openRowKey === deal.key;
+                                  const computeOpen = openComputeKey === deal.key;
+                                  const id = getDealId(u);
+                                  const c = computeSample(deal.bestPrice);
+
+                                  return (
+                                    <div key={deal.key} className={rowOpen ? "bg-blue-50/40" : "bg-white"}>
+                                      <button
+                                        className="w-full px-4 py-4 text-left"
+                                        onClick={() => setOpenRowKey(rowOpen ? null : deal.key)}
+                                      >
+                                        <div className="flex items-start justify-between gap-3">
+                                          <div className="min-w-0">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">{deal.type}</span>
+                                              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">{deal.sizeLabel}</span>
+                                              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">{parseFloorNumber(u.Floor)}F</span>
+                                            </div>
+                                            <div className="mt-3 text-xl font-semibold">{fmtPhp(deal.bestPrice)}</div>
+                                            <div className="text-sm font-medium text-emerald-700">{fmtPhp(deal.bestPerSqm)}/sqm</div>
+                                            <div className="mt-1 text-xs text-muted-foreground">
+                                              {u.BuildingUnit} • {u.Facing || "No facing"} • {deal.optionCount} option{deal.optionCount === 1 ? "" : "s"}
+                                            </div>
+                                          </div>
+                                          <span className="shrink-0 text-sm font-medium text-blue-700">{rowOpen ? "Hide" : "View"}</span>
+                                        </div>
+                                      </button>
+
+                                      {rowOpen && (
+                                        <div className="border-t bg-blue-50/30 px-4 py-4">
+                                          <div className="rounded-xl border bg-white p-4">
+                                            <div className="mb-3 text-sm font-semibold">Unit Details</div>
+                                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                              <DetailCell label="Project" value={deal.property_name} />
+                                              <DetailCell label="Building" value={tower.towerName} />
+                                              <DetailCell label="Unit" value={u.BuildingUnit} />
+                                              <DetailCell label="Status" value={u.Status || "—"} />
+                                              <DetailCell label="Type" value={deal.type} />
+                                              <DetailCell label="Size" value={deal.sizeLabel} />
+                                              <DetailCell label="Floor" value={`${parseFloorNumber(u.Floor)}F`} />
+                                              <DetailCell label="RFO" value={u.RFODate || "TBA"} />
+                                              <DetailCell label="Amenities" value={u.Amenities || "—"} />
+                                              <DetailCell label="Facing" value={u.Facing || "—"} />
+                                              <DetailCell label="Lowest Price" value={fmtPhp(deal.bestPrice)} />
+                                              <DetailCell label="Price / sqm" value={`${fmtPhp(deal.bestPerSqm)}/sqm`} />
+                                            </div>
+
+                                            <div className="mt-4 grid grid-cols-1 gap-2">
+                                              <Link className="btn btn-outline btn-sm w-full" href={`/computation/${encodeURIComponent(id)}`}>
+                                                Full computation
+                                              </Link>
+                                              <button
+                                                className="btn btn-ghost btn-sm w-full"
+                                                onClick={() => setOpenComputeKey(computeOpen ? null : deal.key)}
+                                              >
+                                                {computeOpen ? "Hide quick sample" : "Show quick sample"}
+                                              </button>
+                                            </div>
+                                          </div>
+
+                                          {computeOpen && (
+                                            <div className="mt-3 rounded-xl border bg-white p-4 text-sm">
+                                              <div className="mb-3 font-semibold">Quick Sample Computation</div>
+                                              <div className="grid grid-cols-2 gap-3">
+                                                <ComputeCell label={`TCP (disc ${discountPct}%)`} value={fmtPhp(c.TCP)} />
+                                                <ComputeCell label={`DP ${downPct}%`} value={fmtPhp(c.dpAmount)} />
+                                                <ComputeCell label="Reservation" value={fmtPhp(reservationFee)} />
+                                                <ComputeCell label={`Net DP / ${monthsToPay} mos`} value={fmtPhp(c.dpMonthly)} />
+                                                <ComputeCell label={`Closing Fee ${closingFeePct}%`} value={fmtPhp(c.closingFee)} />
+                                                <ComputeCell label="Balance" value={fmtPhp(c.bankBalance)} />
+                                                <ComputeCell label={`15 yrs @ ${rate15yr}%`} value={fmtPhp(c.monthly15)} />
+                                                <ComputeCell label={`20 yrs @ ${rate20yr}%`} value={fmtPhp(c.monthly20)} />
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              <div className="hidden xl:block overflow-x-auto">
                                 <table className="w-full min-w-[920px] text-sm">
                                   <thead className="bg-slate-50 text-xs text-slate-500">
                                     <tr>
