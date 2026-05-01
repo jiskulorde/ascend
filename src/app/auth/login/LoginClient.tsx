@@ -69,22 +69,30 @@ export default function LoginClient() {
     }
   }
 
-  async function signInWithGoogle() {
-    setErr(null);
-    setBusy(true);
-    try {
-      const redirectTo = `${window.location.origin}/auth/redirect?next=${encodeURIComponent(next)}`;
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo },
-      });
-      if (error) throw error;
-      // Redirect happens automatically
-    } catch (e: any) {
-      setErr(e.message ?? "Google sign-in failed");
-      setBusy(false);
-    }
+ async function signInWithGoogle() {
+  setErr(null);
+  setBusy(true);
+  try {
+    // Use build-time env if available, otherwise fall back
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
+
+    const redirectTo = `${siteUrl}/auth/redirect?next=${encodeURIComponent(
+      next
+    )}`;
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    });
+
+    if (error) throw error;
+    // Browser will now go to Supabase → Google → /auth/redirect
+  } catch (e: any) {
+    setErr(e.message ?? "Google sign-in failed");
+    setBusy(false);
   }
+}
 
   return (
     <div className="mx-auto w-full max-w-md">
