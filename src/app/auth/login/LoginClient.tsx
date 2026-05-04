@@ -1,33 +1,48 @@
 // src/app/auth/login/LoginClient.tsx
+
 "use client";
 
-import { useSearchParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { browserSupabase } from "@/lib/supabase/client";
+
+function safeNextPath(value: string | null) {
+  if (!value) return "/dashboard";
+  if (!value.startsWith("/") || value.startsWith("//")) return "/dashboard";
+  return value;
+}
 
 export default function LoginClient() {
   const search = useSearchParams();
-  const next = search.get("next") || "/dashboard";
-  const router = useRouter();
+  const next = useMemo(() => safeNextPath(search.get("next")), [search]);
   const supabase = browserSupabase();
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // shared fields
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
 
-  // signup-only (optional)
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
 
   async function upsertProfile(userId: string) {
-    const payload: any = { id: userId, role: "CLIENT" };
+    const payload: Record<string, string> = {
+      id: userId,
+      role: "CLIENT",
+    };
+
     if (fullName.trim()) payload.full_name = fullName.trim();
     if (phone.trim()) payload.phone = phone.trim();
+
     await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+  }
+
+  async function goToNext() {
+    // Give Supabase a tiny moment to persist cookies, then force a real navigation.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    window.location.assign(next);
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -41,63 +56,60 @@ export default function LoginClient() {
           email,
           password: pass,
         });
+
         if (error) throw error;
-        router.push(next);
+
+        await goToNext();
         return;
-      } else {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password: pass,
-        });
-        if (error) throw error;
-
-        // If email confirmations are OFF, session is available now
-        const userId = data.user?.id;
-        if (userId) {
-          await upsertProfile(userId);
-          router.push(next);
-          return;
-        }
-
-        // If confirmations are ON, user must verify first
-        setErr("Check your email to confirm your account. You can sign in after verifying.");
       }
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: pass,
+      });
+
+      if (error) throw error;
+
+      const userId = data.user?.id;
+
+      if (userId) {
+        await upsertProfile(userId);
+        await goToNext();
+        return;
+      }
+
+      setErr("Check your email to confirm your account. You can sign in after verifying.");
     } catch (e: any) {
       setErr(e.message ?? "Something went wrong");
-    } finally {
       setBusy(false);
     }
   }
 
- async function signInWithGoogle() {
-  setErr(null);
-  setBusy(true);
-  try {
-    // Use build-time env if available, otherwise fall back
-    const siteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
+  async function signInWithGoogle() {
+    setErr(null);
+    setBusy(true);
 
-    const redirectTo = `${siteUrl}/auth/redirect?next=${encodeURIComponent(
-      next
-    )}`;
+    try {
+      const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
+      const redirectTo = `${siteUrl}/auth/redirect?next=${encodeURIComponent(next)}`;
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo },
-    });
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+        },
+      });
 
-    if (error) throw error;
-    // Browser will now go to Supabase → Google → /auth/redirect
-  } catch (e: any) {
-    setErr(e.message ?? "Google sign-in failed");
-    setBusy(false);
+      if (error) throw error;
+    } catch (e: any) {
+      setErr(e.message ?? "Google sign-in failed");
+      setBusy(false);
+    }
   }
-}
 
   return (
     <div className="mx-auto w-full max-w-md">
       <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-        {/* Tabs */}
         <div className="mb-4 flex gap-2 rounded-full bg-muted p-1">
           <button
             className={`flex-1 rounded-full px-3 py-2 text-sm ${
@@ -110,6 +122,7 @@ export default function LoginClient() {
           >
             Sign in
           </button>
+
           <button
             className={`flex-1 rounded-full px-3 py-2 text-sm ${
               mode === "signup"
@@ -133,7 +146,7 @@ export default function LoginClient() {
           {mode === "signup" && (
             <div className="grid grid-cols-1 gap-3">
               <div>
-                <label className="text-sm text-muted-foreground">Full name (optional)</label>
+                <label className="text-sm text-muted-foreground">Full name optional</label>
                 <input
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
@@ -142,8 +155,9 @@ export default function LoginClient() {
                   autoComplete="name"
                 />
               </div>
+
               <div>
-                <label className="text-sm text-muted-foreground">Phone (optional)</label>
+                <label className="text-sm text-muted-foreground">Phone optional</label>
                 <input
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
@@ -182,19 +196,25 @@ export default function LoginClient() {
           </div>
 
           <button type="submit" disabled={busy} className="btn btn-primary w-full">
-            {busy ? (mode === "signin" ? "Signing in…" : "Creating account…") : (mode === "signin" ? "Sign in" : "Create account")}
+            {busy
+              ? mode === "signin"
+                ? "Signing in…"
+                : "Creating account…"
+              : mode === "signin"
+              ? "Sign in"
+              : "Create account"}
           </button>
 
           <div className="relative my-2 text-center text-xs text-muted-foreground">
-            <span className="bg-card px-2 relative z-10">or</span>
-            <div className="absolute left-0 right-0 top-1/2 -z-0 border-t border-border" />
+            <span className="relative z-10 bg-card px-2">or</span>
+            <div className="absolute left-0 right-0 top-1/2 border-t border-border" />
           </div>
 
           <button
             type="button"
             onClick={signInWithGoogle}
             disabled={busy}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 hover:bg-muted transition"
+            className="w-full rounded-lg border border-input bg-background px-3 py-2 transition hover:bg-muted"
           >
             Continue with Google
           </button>
@@ -216,8 +236,9 @@ export default function LoginClient() {
           )}
         </form>
       </div>
+
       <p className="mt-3 text-center text-[11px] text-muted-foreground">
-        We keep sign-up simple: email & password; name/phone optional. New users get a Client account by default.
+        We keep sign-up simple: email and password. New users get a Client account by default.
       </p>
     </div>
   );

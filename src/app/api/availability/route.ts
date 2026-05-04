@@ -1,3 +1,5 @@
+// src/app/api/availability/route.ts
+
 import { NextResponse } from "next/server";
 import { getGoogleSheetValues } from "@/lib/googleSheets";
 import { adminSupabase } from "@/lib/supabase/admin";

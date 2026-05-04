@@ -1,12 +1,21 @@
 // src/app/availability/page.tsx
+
 import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
 import AvailabilityClient from "@/components/availability/AvailabilityClient";
 
+export const dynamic = "force-dynamic";
+
+type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
+
+const ALLOWED_ROLES: Role[] = ["CLIENT", "AGENT", "MANAGER", "ADMIN"];
+
 export default async function AvailabilityPage() {
-  // Authenticate on the server (trusted)
   const supabase = await serverSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     redirect("/auth/login?next=/availability");
@@ -16,13 +25,13 @@ export default async function AvailabilityPage() {
     .from("profiles")
     .select("role")
     .eq("id", user.id)
-    .single();
+    .maybeSingle();
 
-  const allowed = profile?.role === "AGENT" || profile?.role === "MANAGER" || profile?.role === "CLIENT";
-  if (!allowed) {
+  const role = (profile?.role || "CLIENT") as Role;
+
+  if (!ALLOWED_ROLES.includes(role)) {
     redirect("/403");
   }
 
-  // Render the client UI
   return <AvailabilityClient />;
 }

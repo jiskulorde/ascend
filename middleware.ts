@@ -1,45 +1,107 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
+// src/middleware.ts
 
-const guards = [
-  { prefix: "/agent",   allow: ["AGENT", "MANAGER"] as const },
-  { prefix: "/manager", allow: ["MANAGER"] as const },
-  { prefix: "/dashboard", allow: ["CLIENT", "AGENT", "MANAGER"] as const }, // must be logged in
-  { prefix: "/availability", allow: ["AGENT", "MANAGER"] as const }, 
+import { NextResponse, type NextRequest } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+
+type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
+
+const guards: Array<{
+  prefix: string;
+  allow: Role[];
+}> = [
+  { prefix: "/agent", allow: ["AGENT", "MANAGER", "ADMIN"] },
+  { prefix: "/manager", allow: ["MANAGER", "ADMIN"] },
+  { prefix: "/dashboard", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
+
+  // Your Availability page already allows CLIENT, AGENT, and MANAGER.
+  // Keep this consistent with src/app/availability/page.tsx.
+  { prefix: "/availability", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
 ];
 
+function redirectToLogin(req: NextRequest) {
+  const url = req.nextUrl.clone();
+  url.pathname = "/auth/login";
+  url.search = "";
+  url.searchParams.set("next", req.nextUrl.pathname + req.nextUrl.search);
+  return NextResponse.redirect(url);
+}
+
+function redirectTo403(req: NextRequest) {
+  const url = req.nextUrl.clone();
+  url.pathname = "/403";
+  url.search = "";
+  return NextResponse.redirect(url);
+}
+
 export async function middleware(req: NextRequest) {
-  const res = NextResponse.next();
-  const supabase = createMiddlewareClient({ req, res });
-
-  const { data: { session } } = await supabase.auth.getSession();
   const path = req.nextUrl.pathname;
-  const guard = guards.find(g => path.startsWith(g.prefix));
-  if (!guard) return res;
+  const guard = guards.find((g) => path.startsWith(g.prefix));
 
-  // Require login
-  if (!session) {
-    const url = new URL("/auth/login", req.url);
-    url.searchParams.set("next", path);
-    return NextResponse.redirect(url);
+  if (!guard) {
+    return NextResponse.next();
   }
 
-  // Check role
+  let res = NextResponse.next({
+    request: {
+      headers: req.headers,
+    },
+  });
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => {
+            req.cookies.set(name, value);
+          });
+
+          res = NextResponse.next({
+            request: {
+              headers: req.headers,
+            },
+          });
+
+          cookiesToSet.forEach(({ name, value, options }) => {
+            res.cookies.set(name, value, options);
+          });
+        },
+      },
+    }
+  );
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return redirectToLogin(req);
+  }
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
-    .eq("id", session.user.id)
-    .single();
+    .eq("id", user.id)
+    .maybeSingle();
 
-  if (!profile || !guard.allow.includes(profile.role as any)) {
-    return NextResponse.redirect(new URL("/403", req.url));
+  const role = (profile?.role || "CLIENT") as Role;
+
+  if (!guard.allow.includes(role)) {
+    return redirectTo403(req);
   }
 
   return res;
 }
 
-// Which paths the middleware runs on
 export const config = {
-  matcher: ["/agent/:path*", "/manager/:path*", "/dashboard/:path*", "/availability/:path*"],
+  matcher: [
+    "/agent/:path*",
+    "/manager/:path*",
+    "/dashboard/:path*",
+    "/availability/:path*",
+  ],
 };

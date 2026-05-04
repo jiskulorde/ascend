@@ -1,3 +1,5 @@
+// src/app/auth/signout/route.ts
+
 import { NextResponse } from "next/server";
 import { actionSupabase } from "@/lib/supabase/server";
 
