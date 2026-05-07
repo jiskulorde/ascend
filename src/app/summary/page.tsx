@@ -1639,7 +1639,7 @@ export default function PropertySummaryPage() {
                                                 onClick={() => setOpenRowKey(rowOpen ? null : deal.key)}
                                               >
                                                 <span className="px-3 py-3 min-w-0">
-                                                  <span className="block text-[16px] font-bold leading-tight text-slate-900">#{unitNo}</span>
+                                                  <span className="block text-[16px] font-bold leading-tight text-slate-900">{unitNo}</span>
                                                   <span className="block truncate text-[11px] text-slate-500 mt-0.5">{u.BuildingUnit}</span>
                                                 </span>
 
