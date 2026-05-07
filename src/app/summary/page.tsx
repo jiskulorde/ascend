@@ -1055,14 +1055,22 @@ export default function PropertySummaryPage() {
             <div className="card p-2 sm:p-4 space-y-2 sm:space-y-4 rounded-2xl">
               {/* MOBILE CONTROLS */}
               <div className="sm:hidden space-y-2">
-                <label className="block text-[10px] font-medium text-slate-600">
-                  Fast Search
+                <label className="col-span-3 block rounded-2xl border border-amber-300/80 bg-gradient-to-r from-amber-50 via-white to-orange-50 p-2 shadow-[0_12px_30px_rgba(245,158,11,0.16)] ring-1 ring-amber-100 sm:col-span-2 md:col-span-2">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-[10px] font-bold text-amber-800 sm:text-xs">
+                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] text-white shadow-sm sm:h-5 sm:w-5 sm:text-[10px]">
+                        ⌕
+                      </span>
+                      Fast Search
+                    </span>
+                  </div>
+
                   <input
-                    className="input mt-1 h-9 rounded-2xl px-3 text-[12px]"
+                    className="h-8 w-full rounded-xl border border-amber-300 bg-white px-3 text-[11px] font-medium text-slate-900 shadow-inner outline-none transition placeholder:text-slate-500 hover:border-amber-400 focus:border-amber-500 focus:bg-white focus:ring-4 focus:ring-amber-100 sm:h-11 sm:text-sm"
                     type="text"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
-                    placeholder="Search project, building, unit..."
+                    placeholder="Search project, building, unit, type, sqm, facing, price..."
                   />
                 </label>
 
@@ -1098,10 +1106,18 @@ export default function PropertySummaryPage() {
 
               {/* DESKTOP / TABLET CONTROLS */}
               <div className="hidden sm:grid grid-cols-[1fr_190px_190px_140px] gap-3 items-end">
-                <label className="block text-xs">
-                  Fast Search
+                <label className="col-span-3 block rounded-2xl border border-amber-300/80 bg-gradient-to-r from-amber-50 via-white to-orange-50 p-2 shadow-[0_12px_30px_rgba(245,158,11,0.16)] ring-1 ring-amber-100 sm:col-span-2 md:col-span-2">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-[10px] font-bold text-amber-800 sm:text-xs">
+                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] text-white shadow-sm sm:h-5 sm:w-5 sm:text-[10px]">
+                        ⌕
+                      </span>
+                      Fast Search
+                    </span>
+                  </div>
+
                   <input
-                    className="input mt-1 h-11 rounded-2xl px-3 text-sm"
+                    className="h-8 w-full rounded-xl border border-amber-300 bg-white px-3 text-[11px] font-medium text-slate-900 shadow-inner outline-none transition placeholder:text-slate-500 hover:border-amber-400 focus:border-amber-500 focus:bg-white focus:ring-4 focus:ring-amber-100 sm:h-11 sm:text-sm"
                     type="text"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}

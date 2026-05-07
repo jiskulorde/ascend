@@ -45,9 +45,10 @@ const AVAILABILITY_DROPDOWN: DropdownLink = {
 const MAIN_LINKS: NavLink[] = [
   { kind: "link", label: "Home", href: "/" },
   { kind: "link", label: "Projects", href: "/projects" },
+  AVAILABILITY_DROPDOWN,
   { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
   { kind: "link", label: "About", href: "/about" },
-  AVAILABILITY_DROPDOWN,
+  
 ];
 
 export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
