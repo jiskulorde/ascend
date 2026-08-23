@@ -1112,7 +1112,7 @@ export default function PropertySummaryPage() {
                       <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] text-white shadow-sm sm:h-5 sm:w-5 sm:text-[10px]">
                         ⌕
                       </span>
-                      Fast Search
+                      Search
                     </span>
                   </div>
 
