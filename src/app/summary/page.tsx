@@ -369,7 +369,6 @@ export default function PropertySummaryPage() {
   const [bestBy, setBestBy] = useState<BestByMode>("price");
 
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [mobileProjectOpen, setMobileProjectOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [calcOpen, setCalcOpen] = useState(false);
 
@@ -915,136 +914,124 @@ export default function PropertySummaryPage() {
   return (
     <main className="min-h-screen bg-[#f6f7fb] text-[11px] sm:text-xs md:text-sm">
       <div className="mx-auto max-w-[1680px] px-1.5 py-2 sm:px-3 md:px-6 md:py-6">
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[300px_1fr] lg:gap-5 items-start">
-          <aside className="card p-0 overflow-hidden lg:sticky lg:top-24">
-            <div className="bg-[#0f172a] text-white px-2.5 py-2 sm:px-4 sm:py-4">
-              <div className="flex items-start justify-between gap-2 sm:gap-3">
-                <div>
-                  <div className="text-[9px] sm:text-xs uppercase tracking-wide opacity-70">Inventory Navigation</div>
-                  <div className="text-xs sm:text-lg font-semibold">All Projects</div>
-                  <div className="text-[10px] sm:text-xs opacity-80 mt-0.5 sm:mt-1">
-                    Multi-select projects • {allProjectNavItems.length} total
-                  </div>
-                </div>
-                <button
-                  className="lg:hidden rounded-full bg-white/12 px-2.5 py-1 text-[10px] font-medium hover:bg-white/20"
-                  onClick={() => setMobileProjectOpen((prev) => !prev)}
-                >
-                  {mobileProjectOpen ? "Hide" : "Show"}
-                </button>
-              </div>
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[240px_1fr] lg:gap-5 items-start">
+          <aside className="hidden lg:block card p-0 overflow-hidden lg:sticky lg:top-24">
+            <div className="bg-[#0f172a] text-white px-3 py-2.5">
+              <div className="text-[10px] uppercase tracking-wide opacity-70">Projects</div>
+              <div className="text-sm font-semibold">{allProjectNavItems.length} total</div>
             </div>
 
-            <div className={`${mobileProjectOpen ? "block" : "hidden"} lg:block`}>
-              <div className="p-2 sm:p-3 border-b bg-white space-y-1.5 sm:space-y-3">
-                <input
-                  className="input h-9 rounded-2xl text-[11px] sm:h-10 sm:text-sm"
-                  type="text"
-                  value={projectQ}
-                  onChange={(e) => setProjectQ(e.target.value)}
-                  placeholder="Search project list..."
-                />
+            <div className="p-2 border-b bg-white space-y-1.5">
+              <input
+                className="input h-8 rounded-xl text-[11px]"
+                type="text"
+                value={projectQ}
+                onChange={(e) => setProjectQ(e.target.value)}
+                placeholder="Search project list..."
+              />
 
+              <button
+                className={`w-full rounded-lg border px-2.5 py-1.5 text-left text-[11px] font-semibold transition ${
+                  selectedProjectCodes.length === 0
+                    ? "bg-blue-50 border-blue-200 text-blue-700"
+                    : "bg-white hover:bg-slate-50"
+                }`}
+                onClick={() => {
+                  setSelectedProjectCodes([]);
+                  setOpenRowKey(null);
+                  setOpenComputeKey(null);
+                }}
+              >
+                View All Projects
+              </button>
+
+              {selectedProjectCodes.length > 0 && (
                 <button
-                  className={`w-full rounded-2xl border px-3 py-2 text-left text-[11px] sm:text-sm transition ${
-                    selectedProjectCodes.length === 0
-                      ? "bg-blue-50 border-blue-200 text-blue-700"
-                      : "bg-white hover:bg-slate-50"
-                  }`}
-                  onClick={() => {
-                    setSelectedProjectCodes([]);
-                    setOpenRowKey(null);
-                    setOpenComputeKey(null);
-                  }}
+                  className="w-full rounded-lg border border-red-100 bg-red-50 px-2.5 py-1.5 text-left text-[11px] text-red-700 hover:bg-red-100"
+                  onClick={() => setSelectedProjectCodes([])}
                 >
-                  <div className="font-semibold">View All Projects</div>
-                  <div className="hidden sm:block text-xs text-muted-foreground">Clear project selection only</div>
+                  Clear {selectedProjectCodes.length} selected
                 </button>
+              )}
+            </div>
 
-                {selectedProjectCodes.length > 0 && (
+            <div className="max-h-[calc(100vh-260px)] overflow-y-auto p-1.5 space-y-1">
+              {projectNavItems.map((p) => {
+                const active = selectedProjectCodes.includes(p.property_code);
+
+                return (
                   <button
-                    className="w-full rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-left text-[11px] text-red-700 hover:bg-red-100 sm:text-sm"
-                    onClick={() => setSelectedProjectCodes([])}
+                    key={p.property_code}
+                    className={`w-full rounded-lg border px-2.5 py-1.5 text-left transition ${
+                      active
+                        ? "bg-[color:var(--primary)] text-white border-[color:var(--primary)]"
+                        : "bg-white hover:bg-slate-50 border-slate-200"
+                    }`}
+                    onClick={() => {
+                      setSelectedProjectCodes((prev) => toggleValue(prev, p.property_code));
+                      setOpenRowKey(null);
+                      setOpenComputeKey(null);
+                    }}
                   >
-                    Clear {selectedProjectCodes.length} selected project{selectedProjectCodes.length === 1 ? "" : "s"}
-                  </button>
-                )}
-              </div>
-
-              <div className="max-h-[36vh] lg:max-h-[calc(100vh-330px)] overflow-y-auto p-1.5 sm:p-2 grid grid-cols-2 gap-1.5 lg:block lg:space-y-2">
-                {projectNavItems.map((p) => {
-                  const active = selectedProjectCodes.includes(p.property_code);
-
-                  return (
-                    <button
-                      key={p.property_code}
-                      className={`w-full rounded-2xl border px-2 py-2 sm:px-3 sm:py-3 text-left transition ${
-                        active
-                          ? "bg-[color:var(--primary)] text-white border-[color:var(--primary)] shadow-sm"
-                          : "bg-white hover:bg-slate-50 border-slate-200"
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-[11.5px] font-semibold leading-tight">{p.property_name}</span>
+                      <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] ${active ? "bg-white/20" : "bg-slate-100"}`}>
+                        {active ? "✓" : p.unitCount}
+                      </span>
+                    </div>
+                    <div
+                      className={`flex items-center justify-between gap-2 text-[10px] mt-0.5 ${
+                        active ? "text-white/80" : "text-muted-foreground"
                       }`}
-                      onClick={() => {
-                        setSelectedProjectCodes((prev) => toggleValue(prev, p.property_code));
-                        setOpenRowKey(null);
-                        setOpenComputeKey(null);
-                      }}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-[10px] sm:text-sm font-semibold leading-tight line-clamp-2 lg:truncate">
-                            {p.property_name}
-                          </div>
-                          <div
-                            className={`hidden sm:block text-[10px] sm:text-xs mt-0.5 truncate ${
-                              active ? "text-white/80" : "text-muted-foreground"
-                            }`}
-                          >
-                            {p.city || "No city"}
-                          </div>
-                        </div>
-                        <div className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? "bg-white/20" : "bg-slate-100"}`}>
-                          {active ? "✓" : p.unitCount}
-                        </div>
-                      </div>
-                      <div className={`hidden sm:block text-xs mt-2 ${active ? "text-white/85" : "text-muted-foreground"}`}>
-                        Lowest in inventory: <span className="font-semibold">{fmtPhp(p.lowestPrice)}</span>
-                      </div>
-                    </button>
-                  );
-                })}
+                      <span className="truncate">{p.city || "No city"}</span>
+                      <span className="shrink-0 font-medium">{fmtCompactPhp(p.lowestPrice)}</span>
+                    </div>
+                  </button>
+                );
+              })}
 
-                {projectNavItems.length === 0 && (
-                  <div className="p-4 text-sm text-muted-foreground">No project name matches your sidebar search.</div>
-                )}
-              </div>
+              {projectNavItems.length === 0 && (
+                <div className="p-3 text-xs text-muted-foreground">No project name matches your search.</div>
+              )}
             </div>
           </aside>
 
           <section className="space-y-2 md:space-y-4 min-w-0">
             <header className="space-y-2 md:space-y-3">
-              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                <div>
+              <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2 md:gap-3">
+                <div className="min-w-0">
                   <h1 className="text-base sm:text-2xl md:text-3xl font-semibold">Property Summary</h1>
-                  <p className="hidden sm:block text-xs md:text-sm text-muted-foreground mt-1 max-w-4xl">
-                    List view by project and building. Click a row to view details, computation, and full unit information.
+                  <p className="text-[10px] sm:text-xs text-muted-foreground mt-1 truncate">
+                    Viewing <span className="font-semibold text-slate-700">{selectedProjectNames}</span>
+                    {lastUpdated ? ` • Updated ${lastUpdated.date}, ${lastUpdated.time}` : ""}
                   </p>
-                  {lastUpdated && (
-                    <p className="mt-1 text-[10px] sm:text-xs text-muted-foreground">
-                      Last updated: <span className="font-semibold text-slate-700">{lastUpdated.date}</span> • {lastUpdated.time}
-                    </p>
-                  )}
                 </div>
 
-                <div className="card px-2.5 py-2 sm:px-4 sm:py-3 min-w-0 md:min-w-[260px] rounded-2xl">
-                  <div className="text-[10px] sm:text-xs text-muted-foreground">Viewing</div>
-                  <div className="text-xs sm:text-base font-semibold truncate">{selectedProjectNames}</div>
-                  <div className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
-                    {stats.matchingUnits} units • {stats.dealRows} lowest rows
-                  </div>
-                </div>
+                <label className="block lg:hidden">
+                  <span className="mb-1 block text-[10px] font-medium text-slate-600">Project</span>
+                  <select
+                    className="h-9 rounded-xl text-[12px]"
+                    value={selectedProjectCodes.length === 1 ? selectedProjectCodes[0] : ""}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSelectedProjectCodes(value ? [value] : []);
+                      setOpenRowKey(null);
+                      setOpenComputeKey(null);
+                    }}
+                  >
+                    <option value="">All Projects ({allProjectNavItems.length})</option>
+                    {allProjectNavItems.map((p) => (
+                      <option key={p.property_code} value={p.property_code}>
+                        {p.property_name}
+                        {p.city ? ` — ${p.city}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
 
-              <div className="grid grid-cols-5 gap-1 md:gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5 md:gap-3">
                 <StatCard label="Matching Units" value={fmtNumber(stats.matchingUnits)} />
                 <StatCard label="Projects Found" value={fmtNumber(stats.projectCount)} />
                 <StatCard label="Buildings Found" value={fmtNumber(stats.towerCount)} />
@@ -1053,21 +1040,17 @@ export default function PropertySummaryPage() {
               </div>
             </header>
 
-            <div className="card p-2 sm:p-4 space-y-2 sm:space-y-4 rounded-2xl">
-              {/* MOBILE CONTROLS */}
-              <div className="sm:hidden space-y-2">
-                <label className="col-span-3 block rounded-2xl border border-amber-300/80 bg-gradient-to-r from-amber-50 via-white to-orange-50 p-2 shadow-[0_12px_30px_rgba(245,158,11,0.16)] ring-1 ring-amber-100 sm:col-span-2 md:col-span-2">
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-1.5 text-[10px] font-bold text-amber-800 sm:text-xs">
-                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] text-white shadow-sm sm:h-5 sm:w-5 sm:text-[10px]">
-                        ⌕
-                      </span>
-                      Fast Search
+            <div className="card p-2 sm:p-3 md:p-4 space-y-2 sm:space-y-3 rounded-2xl">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
+                <label className="flex-1 min-w-0 block rounded-xl border border-amber-200/70 bg-gradient-to-r from-amber-50/70 via-white to-orange-50/40 p-1.5 shadow-sm ring-1 ring-amber-100/50 sm:p-2">
+                  <span className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold text-amber-800 sm:text-xs">
+                    <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-400 text-[8px] text-white sm:h-4 sm:w-4 sm:text-[9px]">
+                      ⌕
                     </span>
-                  </div>
-
+                    Search
+                  </span>
                   <input
-                    className="h-8 w-full rounded-xl border border-amber-300 bg-white px-3 text-[11px] font-medium text-slate-900 shadow-inner outline-none transition placeholder:text-slate-500 hover:border-amber-400 focus:border-amber-500 focus:bg-white focus:ring-4 focus:ring-amber-100 sm:h-11 sm:text-sm"
+                    className="h-8 w-full rounded-lg border border-amber-200 bg-white px-3 text-[12px] font-medium text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-amber-300 focus:border-amber-400 focus:ring-2 focus:ring-amber-100 sm:h-10 sm:text-sm"
                     type="text"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
@@ -1075,7 +1058,7 @@ export default function PropertySummaryPage() {
                   />
                 </label>
 
-                <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5 items-end">
+                <div className="grid grid-cols-3 gap-1.5 sm:flex sm:shrink-0 sm:gap-3">
                   <CompactSelect
                     label="Best"
                     value={bestBy}
@@ -1092,81 +1075,34 @@ export default function PropertySummaryPage() {
                     compact
                   />
 
-                  <button
-                    className={`h-9 rounded-xl border px-3 text-[12px] font-semibold transition ${
-                      filtersOpen
-                        ? "border-blue-200 bg-blue-50 text-blue-700"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                    }`}
-                    onClick={() => setFiltersOpen((prev) => !prev)}
-                  >
-                    {activeFilterCount ? `Filters (${activeFilterCount})` : "Filters"}
-                  </button>
+                  <div className="flex flex-col">
+                    <span className="mb-0.5 block text-[10px] text-transparent select-none">·</span>
+                    <button
+                      className={`h-9 sm:h-11 rounded-xl border px-3 text-[12px] sm:text-sm font-semibold transition ${
+                        filtersOpen
+                          ? "border-blue-200 bg-blue-50 text-blue-700"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                      onClick={() => setFiltersOpen((prev) => !prev)}
+                    >
+                      {activeFilterCount ? `Filters (${activeFilterCount})` : "Filters"}
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {/* DESKTOP / TABLET CONTROLS */}
-              <div className="hidden sm:grid grid-cols-[1fr_190px_190px_140px] gap-3 items-end">
-                <label className="col-span-3 block rounded-2xl border border-amber-300/80 bg-gradient-to-r from-amber-50 via-white to-orange-50 p-2 shadow-[0_12px_30px_rgba(245,158,11,0.16)] ring-1 ring-amber-100 sm:col-span-2 md:col-span-2">
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-1.5 text-[10px] font-bold text-amber-800 sm:text-xs">
-                      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] text-white shadow-sm sm:h-5 sm:w-5 sm:text-[10px]">
-                        ⌕
-                      </span>
-                      Search
-                    </span>
-                  </div>
-
-                  <input
-                    className="h-8 w-full rounded-xl border border-amber-300 bg-white px-3 text-[11px] font-medium text-slate-900 shadow-inner outline-none transition placeholder:text-slate-500 hover:border-amber-400 focus:border-amber-500 focus:bg-white focus:ring-4 focus:ring-amber-100 sm:h-11 sm:text-sm"
-                    type="text"
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="Search project, building, unit, type, sqm, facing, price..."
-                  />
-                </label>
-
-                <CompactSelect
-                  label="Best"
-                  value={bestBy}
-                  options={BEST_BY_OPTIONS}
-                  onChange={(value) => setBestBy(value as BestByMode)}
-                />
-
-                <CompactSelect
-                  label="Sort"
-                  value={sortMode}
-                  options={SORT_OPTIONS}
-                  onChange={(value) => setSortMode(value as SortMode)}
-                />
-
-                <button
-                  className={`h-11 rounded-2xl border px-3 text-sm font-semibold transition ${
-                    filtersOpen
-                      ? "border-blue-200 bg-blue-50 text-blue-700"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                  onClick={() => setFiltersOpen((prev) => !prev)}
-                >
-                  {filtersOpen ? "Hide Filters" : activeFilterCount ? `Filters (${activeFilterCount})` : "Filters"}
-                </button>
-              </div>
-
               {filtersOpen && (
-                <div className="space-y-2 sm:space-y-4 rounded-2xl border bg-slate-50 p-2 sm:p-4">
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-3">
-                    <div>
-                      <div className="text-xs sm:text-sm font-semibold">Filters</div>
-                      <div className="hidden sm:block text-xs text-muted-foreground">Hidden by default to keep the page clean.</div>
-                    </div>
-                    <button className="btn btn-outline btn-sm h-8 rounded-2xl px-3 text-[11px] sm:text-xs" onClick={resetFilters}>
+                <div className="max-h-[70vh] overflow-y-auto space-y-2 sm:space-y-3 rounded-2xl border bg-slate-50 p-2 sm:p-3">
+                  <div className="flex items-center justify-between gap-2 md:gap-3">
+                    <div className="text-xs sm:text-sm font-semibold">Filters</div>
+                    <button className="btn btn-outline btn-sm h-7 rounded-xl px-2.5 text-[11px] sm:text-xs" onClick={resetFilters}>
                       Reset all
                     </button>
                   </div>
 
-                  <div className="space-y-1.5 sm:space-y-2">
+                  <div className="space-y-1 sm:space-y-1.5">
                     <FilterGroupHeader title="Unit Type" onClear={() => setSelectedTypes([])} hasValue={selectedTypes.length > 0} />
-                    <div className="flex flex-wrap gap-1 sm:gap-2">
+                    <div className="flex flex-wrap gap-1">
                       {availableTypes.map((t) => (
                         <PillButton key={t} active={selectedTypes.includes(t)} onClick={() => setSelectedTypes((prev) => toggleValue(prev, t))}>
                           {t}
@@ -1175,10 +1111,10 @@ export default function PropertySummaryPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-4">
-                    <div className="space-y-1.5 sm:space-y-2">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3">
+                    <div className="space-y-1 sm:space-y-1.5">
                       <FilterGroupHeader title="Facing" onClear={() => setSelectedFacings([])} hasValue={selectedFacings.length > 0} />
-                      <div className="flex flex-wrap gap-1 sm:gap-2">
+                      <div className="flex flex-wrap gap-1">
                         {availableFacings.map((f) => (
                           <PillButton key={f} active={selectedFacings.includes(f)} onClick={() => setSelectedFacings((prev) => toggleValue(prev, f))}>
                             {f}
@@ -1188,13 +1124,13 @@ export default function PropertySummaryPage() {
                       </div>
                     </div>
 
-                    <div className="space-y-1.5 sm:space-y-2">
+                    <div className="space-y-1 sm:space-y-1.5">
                       <FilterGroupHeader
                         title="Floor"
                         onClear={() => setFloorRange(DEFAULT_FLOOR_RANGE)}
                         hasValue={floorRange[0] !== DEFAULT_FLOOR_RANGE[0] || floorRange[1] !== DEFAULT_FLOOR_RANGE[1]}
                       />
-                      <div className="flex flex-wrap gap-1 sm:gap-2">
+                      <div className="flex flex-wrap gap-1">
                         <PillButton active={floorRange[0] === 0 && floorRange[1] === 80} onClick={() => setFloorPreset("all")}>
                           All floors
                         </PillButton>
@@ -1208,9 +1144,9 @@ export default function PropertySummaryPage() {
                           High 21F+
                         </PillButton>
                       </div>
-                      <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+                      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1.5">
                         <input
-                          className="input rounded-2xl"
+                          className="input h-8 rounded-xl px-2 text-[12px]"
                           type="number"
                           min={0}
                           max={floorRange[1]}
@@ -1220,8 +1156,9 @@ export default function PropertySummaryPage() {
                             setFloorRange([lo, floorRange[1]]);
                           }}
                         />
+                        <span className="text-[10px] text-muted-foreground">to</span>
                         <input
-                          className="input rounded-2xl"
+                          className="input h-8 rounded-xl px-2 text-[12px]"
                           type="number"
                           min={floorRange[0]}
                           max={80}
@@ -1235,7 +1172,7 @@ export default function PropertySummaryPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-1.5 sm:space-y-2">
+                  <div className="space-y-1 sm:space-y-1.5">
                     <FilterGroupHeader
                       title={`Size ${hasValidSizeBounds ? `(${sizeRange[0]} – ${sizeRange[1]} sqm)` : ""}`}
                       onClear={() => setSizeFilterActive(false)}
@@ -1277,9 +1214,9 @@ export default function PropertySummaryPage() {
                             );
                           }}
                         />
-                        <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1.5">
                           <input
-                            className="input w-24 rounded-2xl"
+                            className="input h-8 rounded-xl px-2 text-[12px]"
                             type="number"
                             value={sizeRange[0]}
                             min={sizeBounds.min}
@@ -1292,9 +1229,9 @@ export default function PropertySummaryPage() {
                               ]);
                             }}
                           />
-                          <span className="text-xs text-muted-foreground">to</span>
+                          <span className="text-[10px] text-muted-foreground">to</span>
                           <input
-                            className="input w-24 rounded-2xl"
+                            className="input h-8 rounded-xl px-2 text-[12px]"
                             type="number"
                             value={sizeRange[1]}
                             min={sizeRange[0]}
@@ -1314,21 +1251,21 @@ export default function PropertySummaryPage() {
                     )}
                   </div>
 
-                  <div className="rounded-2xl border bg-white">
+                  <div className="rounded-xl border bg-white">
                     <button
-                      className="flex w-full items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3 text-left"
+                      className="flex w-full items-center justify-between px-2.5 py-2 sm:px-3 text-left"
                       onClick={() => setAdvancedOpen((prev) => !prev)}
                     >
                       <div>
                         <div className="text-xs sm:text-sm font-semibold">More Filters</div>
-                        <div className="hidden sm:block text-xs text-muted-foreground">City, amenities, status, and budget</div>
+                        <div className="hidden sm:block text-[11px] text-muted-foreground">City, amenities, status, and budget</div>
                       </div>
-                      <span className="text-[11px] sm:text-sm text-muted-foreground">{advancedOpen ? "Hide" : "Show"}</span>
+                      <span className="text-[11px] sm:text-xs text-muted-foreground">{advancedOpen ? "Hide" : "Show"}</span>
                     </button>
 
                     {advancedOpen && (
-                      <div className="border-t p-2 sm:p-4 space-y-2 sm:space-y-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-4">
+                      <div className="border-t p-2 sm:p-3 space-y-2 sm:space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                           <CompactSelect
                             label="Status"
                             value={statusMode}
@@ -1340,7 +1277,7 @@ export default function PropertySummaryPage() {
                           <label className="block text-[11px] sm:text-xs">
                             Max Budget
                             <input
-                              className="input mt-0.5 h-9 rounded-2xl text-[11px] sm:mt-1 sm:h-10 sm:text-sm"
+                              className="input mt-0.5 h-9 rounded-xl text-[11px] sm:h-10 sm:text-sm"
                               type="number"
                               value={maxBudget}
                               onChange={(e) => setMaxBudget(e.target.value)}
@@ -1349,20 +1286,22 @@ export default function PropertySummaryPage() {
                           </label>
                         </div>
 
-                        <div className="space-y-1.5 sm:space-y-2">
+                        <div className="space-y-1 sm:space-y-1.5">
                           <FilterGroupHeader title="City" onClear={() => setSelectedCities([])} hasValue={selectedCities.length > 0} />
-                          <div className="flex flex-wrap gap-1 sm:gap-2">
-                            {availableCities.map((c) => (
-                              <PillButton key={c} active={selectedCities.includes(c)} onClick={() => setSelectedCities((prev) => toggleValue(prev, c))}>
-                                {c}
-                              </PillButton>
-                            ))}
+                          <div className="max-h-24 overflow-y-auto rounded-lg border border-slate-100 bg-slate-50/60 p-1.5">
+                            <div className="flex flex-wrap gap-1">
+                              {availableCities.map((c) => (
+                                <PillButton key={c} active={selectedCities.includes(c)} onClick={() => setSelectedCities((prev) => toggleValue(prev, c))}>
+                                  {c}
+                                </PillButton>
+                              ))}
+                            </div>
                           </div>
                         </div>
 
-                        <div className="space-y-1.5 sm:space-y-2">
+                        <div className="space-y-1 sm:space-y-1.5">
                           <FilterGroupHeader title="Amenities" onClear={() => setSelectedAmenities([])} hasValue={selectedAmenities.length > 0} />
-                          <div className="flex flex-wrap gap-1 sm:gap-2">
+                          <div className="flex flex-wrap gap-1">
                             {availableAmenities.map((a) => (
                               <PillButton
                                 key={a}
@@ -1418,20 +1357,17 @@ export default function PropertySummaryPage() {
                 </div>
               )}
 
-              <div className="rounded-2xl border bg-white">
+              <div className="rounded-xl border bg-white">
                 <button
-                  className="flex w-full items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3 text-left"
+                  className="flex w-full items-center justify-between px-2.5 py-2 sm:px-3 text-left"
                   onClick={() => setCalcOpen((prev) => !prev)}
                 >
-                  <div>
-                    <div className="text-xs sm:text-sm font-semibold">Quick Computation Assumptions</div>
-                    <div className="hidden sm:block text-xs text-muted-foreground">Hidden by default</div>
-                  </div>
-                  <span className="text-[11px] sm:text-sm text-muted-foreground">{calcOpen ? "Hide" : "Show"}</span>
+                  <div className="text-xs sm:text-sm font-semibold">Quick Computation Assumptions</div>
+                  <span className="text-[11px] sm:text-xs text-muted-foreground">{calcOpen ? "Hide" : "Show"}</span>
                 </button>
 
                 {calcOpen && (
-                  <div className="border-t p-2 sm:p-4 grid grid-cols-3 md:grid-cols-6 gap-1.5 sm:gap-3 text-[11px] sm:text-sm">
+                  <div className="max-h-[70vh] overflow-y-auto border-t p-2 sm:p-3 grid grid-cols-3 md:grid-cols-6 gap-1.5 sm:gap-3 text-[11px] sm:text-sm">
                     <NumberInput label="Discount %" value={discountPct} step={0.1} onChange={setDiscountPct} />
                     <NumberInput label="DP %" value={downPct} step={0.1} onChange={setDownPct} />
                     <NumberInput
@@ -1485,7 +1421,7 @@ export default function PropertySummaryPage() {
                             </div>
                           </div>
                           <div className="text-[10px] sm:text-xs opacity-90">
-                            {group.rows.length} lowest rows • Cheapest {fmtPhp(lowestGroupPrice)} • {fmtPhp(lowestGroupPerSqm)}/sqm
+                            {group.rows.length} options • from {fmtCompactPhp(lowestGroupPrice)} • {fmtCompactPhp(lowestGroupPerSqm)}/sqm
                           </div>
                         </div>
                       </div>
@@ -1494,23 +1430,20 @@ export default function PropertySummaryPage() {
                         {group.towerGroups.map((tower) => (
                           <div
                             key={tower.towerKey}
-                            className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+                            className="border border-slate-200 bg-white"
                           >
                             <div className="grid grid-cols-1 xl:grid-cols-[170px_1fr]">
-                              <div className="border-b xl:border-b-0 xl:border-r bg-slate-50/80 px-3 py-3 sm:px-4">
-                                <div className="flex items-start justify-between gap-3 xl:block">
+                              <div className="border-b xl:border-b-0 xl:border-r bg-slate-50/80 px-3 py-2.5 sm:px-4">
+                                <div className="flex items-center justify-between gap-3 xl:block">
                                   <div className="min-w-0">
                                     <div className="text-[9px] sm:text-[10px] uppercase tracking-wide text-slate-500">Building</div>
-                                    <div className="text-[18px] leading-tight font-bold text-slate-900 mt-0.5">{tower.towerName}</div>
+                                    <div className="text-[15px] sm:text-[16px] leading-tight font-bold text-slate-900 mt-0.5 truncate">{tower.towerName}</div>
                                   </div>
 
-                                  <div className="text-right xl:text-left text-[11px] sm:text-xs text-slate-600 shrink-0 xl:mt-3">
-                                    <div>{tower.rows.length} row{tower.rows.length === 1 ? "" : "s"}</div>
+                                  <div className="text-right xl:text-left text-[11px] text-slate-600 shrink-0 xl:mt-1.5">
+                                    <div>{tower.rows.length} option{tower.rows.length === 1 ? "" : "s"}</div>
                                     <div>
-                                      Low <span className="font-semibold text-slate-800">{fmtCompactPhp(tower.lowestPrice)}</span>
-                                    </div>
-                                    <div>
-                                      ₱/sqm <span className="font-semibold text-emerald-700">{fmtCompactPhp(tower.lowestPerSqm)}</span>
+                                      from <span className="font-semibold text-slate-800">{fmtCompactPhp(tower.lowestPrice)}</span>
                                     </div>
                                   </div>
                                 </div>
@@ -1518,7 +1451,7 @@ export default function PropertySummaryPage() {
 
                               {/* MOBILE */}
                               <div className="xl:hidden bg-white">
-                                <div className="grid grid-cols-[1.15fr_.7fr_.9fr_.8fr_18px] items-center gap-1 border-b bg-slate-50 px-2 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                                <div className="grid grid-cols-[1.15fr_.7fr_.9fr_.8fr_18px] items-center gap-1 border-b border-blue-100 bg-blue-50/70 px-2 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-[color:var(--primary)]">
                                   <span>Unit</span>
                                   <span>Type</span>
                                   <span className="text-right">Price</span>
@@ -1578,12 +1511,10 @@ export default function PropertySummaryPage() {
                                         {rowOpen && (
                                           <div className="border-t bg-white px-2.5 py-2.5">
                                             <div className="grid grid-cols-2 gap-x-2 gap-y-2 text-[10px]">
-                                              <DetailCell label="Unit #" value={unitNo} />
                                               <DetailCell label="Unit" value={u.BuildingUnit} />
                                               <DetailCell label="Status" value={u.Status || "—"} />
                                               <DetailCell label="RFO" value={u.RFODate || "TBA"} />
                                               <DetailCell label="Amenities" value={u.Amenities || "—"} />
-                                              <DetailCell label="Options" value={String(deal.optionCount)} />
                                             </div>
 
                                             <div className="mt-2.5 grid grid-cols-2 gap-2">
@@ -1622,9 +1553,9 @@ export default function PropertySummaryPage() {
                               </div>
 
                               {/* DESKTOP */}
-                              <div className="hidden xl:block overflow-hidden">
-                                <table className="w-full table-fixed text-[13px]">
-                                  <thead className="bg-[#28459a] text-white text-[11px] uppercase tracking-wide">
+                              <div className="hidden xl:block">
+                                <table className="w-full table-fixed rounded-none shadow-none text-[13px]">
+                                  <thead className="border-b border-blue-100 bg-blue-50/70 text-[11px] uppercase tracking-wide text-[color:var(--primary)]">
                                     <tr>
                                       <th className="px-3 py-3 text-left font-semibold w-[19%]">Unit</th>
                                       <th className="px-2 py-3 text-left font-semibold w-[9%]">Type</th>
@@ -1693,19 +1624,10 @@ export default function PropertySummaryPage() {
                                                     <div className="rounded-xl border bg-white p-4">
                                                       <div className="mb-3 text-sm font-semibold">Unit Details</div>
                                                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                                                        <DetailCell label="Project" value={deal.property_name} />
-                                                        <DetailCell label="Building" value={tower.towerName} />
-                                                        <DetailCell label="Unit #" value={unitNo} />
                                                         <DetailCell label="Unit" value={u.BuildingUnit} />
                                                         <DetailCell label="Status" value={u.Status || "—"} />
-                                                        <DetailCell label="Type" value={deal.type} />
-                                                        <DetailCell label="Size" value={deal.sizeLabel} />
-                                                        <DetailCell label="Floor" value={`${parseFloorNumber(u.Floor)}F`} />
                                                         <DetailCell label="RFO" value={u.RFODate || "TBA"} />
                                                         <DetailCell label="Amenities" value={u.Amenities || "—"} />
-                                                        <DetailCell label="Facing" value={u.Facing || "—"} />
-                                                        <DetailCell label="Lowest Price" value={fmtPhp(deal.bestPrice)} />
-                                                        <DetailCell label="Price / sqm" value={`${fmtPhp(deal.bestPerSqm)}/sqm`} />
                                                       </div>
                                                     </div>
 
@@ -1853,9 +1775,9 @@ function CompactSelect({
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="card rounded-2xl px-1.5 py-1 sm:px-4 sm:py-3">
-      <div className="truncate text-[8px] sm:text-xs text-muted-foreground">{label}</div>
-      <div className="truncate text-[10px] sm:text-lg md:text-xl font-semibold">{value}</div>
+    <div className="card rounded-2xl px-2 py-1.5 sm:px-4 sm:py-3">
+      <div className="truncate text-[9.5px] sm:text-xs text-muted-foreground">{label}</div>
+      <div className="break-words leading-tight text-[13px] sm:text-lg md:text-xl font-semibold">{value}</div>
     </div>
   );
 }
@@ -1864,7 +1786,7 @@ function PillButton({ active, onClick, children }: { active: boolean; onClick: (
   return (
     <button
       type="button"
-      className={`rounded-full border px-2 py-1 text-[10px] sm:px-3 sm:py-1.5 sm:text-xs font-medium transition ${
+      className={`rounded-full border px-2 py-0.5 text-[10px] sm:px-2.5 sm:py-1 sm:text-[11px] font-medium transition ${
         active
           ? "bg-[color:var(--primary)] text-white border-[color:var(--primary)] shadow-sm"
           : "bg-white hover:bg-slate-50 border-slate-200 text-slate-700"
