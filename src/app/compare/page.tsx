@@ -1,9 +1,27 @@
+// src/app/compare/page.tsx
+
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Select from "react-select";
 import { useRouter } from "next/navigation";
 import { makeUnitId, matchesLegacyOrCanonical } from "@/lib/unit-id";
+import { RESERVATION_FEE_DEFAULT, DOWNPAYMENT_PERCENT_DEFAULT } from "@/lib/quoteDefaults";
+
+// Bump this whenever the meaning of a stored "compare_adjustments" field changes.
+const COMPARE_ADJUSTMENTS_VERSION = 2;
+// Former shared defaults, kept only so old unversioned localStorage values that exactly
+// match them can be remapped to the new approved defaults (see the migration effect below).
+const FORMER_DOWNPAYMENT_PERCENT_DEFAULT = 20;
+const FORMER_RESERVATION_FEE_DEFAULT = 20000;
+
+// Local (non-shared) adjustment defaults, kept in one place so the initial useState calls
+// and the localStorage-migration fallback below can't drift apart.
+const DEFAULT_DISCOUNT_PCT = 0;
+const DEFAULT_MONTHS_TO_PAY = 36;
+const DEFAULT_CLOSING_FEE_PCT = 10.5;
+const DEFAULT_RATE_15YR = 6;
+const DEFAULT_RATE_20YR = 6;
 
 // Shape aligned with your enriched /api/availability output (used in computation)
 type UnitRow = {
@@ -106,13 +124,13 @@ export default function ComparePage() {
   const [compareIds, setCompareIds] = useState<string[]>([]);
 
   // global adjustments
-  const [discountPct, setDiscountPct] = useState<number>(0);
-  const [downPct, setDownPct] = useState<number>(20);
-  const [monthsToPay, setMonthsToPay] = useState<number>(36);
-  const [reservationFee, setReservationFee] = useState<number>(20000);
-  const [closingFeePct, setClosingFeePct] = useState<number>(10.5);
-  const [rate15yr, setRate15yr] = useState<number>(6);
-  const [rate20yr, setRate20yr] = useState<number>(6);
+  const [discountPct, setDiscountPct] = useState<number>(DEFAULT_DISCOUNT_PCT);
+  const [downPct, setDownPct] = useState<number>(DOWNPAYMENT_PERCENT_DEFAULT);
+  const [monthsToPay, setMonthsToPay] = useState<number>(DEFAULT_MONTHS_TO_PAY);
+  const [reservationFee, setReservationFee] = useState<number>(RESERVATION_FEE_DEFAULT);
+  const [closingFeePct, setClosingFeePct] = useState<number>(DEFAULT_CLOSING_FEE_PCT);
+  const [rate15yr, setRate15yr] = useState<number>(DEFAULT_RATE_15YR);
+  const [rate20yr, setRate20yr] = useState<number>(DEFAULT_RATE_20YR);
 
   // mobile adjustments panel
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
@@ -133,27 +151,69 @@ export default function ComparePage() {
       }
     } catch {}
 
-    // Preload saved global tweaks if you want persistence:
+    // Preload saved global tweaks if you want persistence.
+    // Conservative migration: unrelated fields (discount/months/closing/rates) are always
+    // preserved as-is; downPct/reservationFee are only remapped from their FORMER default
+    // values to the new approved defaults, so a deliberately-customized value survives.
     try {
       const raw = localStorage.getItem("compare_adjustments");
       if (raw) {
         const s = JSON.parse(raw);
-        if (typeof s.discountPct === "number") setDiscountPct(s.discountPct);
-        if (typeof s.downPct === "number") setDownPct(s.downPct);
-        if (typeof s.monthsToPay === "number") setMonthsToPay(s.monthsToPay);
-        if (typeof s.reservationFee === "number") setReservationFee(s.reservationFee);
-        if (typeof s.closingFeePct === "number") setClosingFeePct(s.closingFeePct);
-        if (typeof s.rate15yr === "number") setRate15yr(s.rate15yr);
-        if (typeof s.rate20yr === "number") setRate20yr(s.rate20yr);
+        const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+        const storedVersion = isNum(s?.version) ? s.version : 0;
+
+        const migrated = {
+          discountPct: isNum(s?.discountPct) ? s.discountPct : DEFAULT_DISCOUNT_PCT,
+          downPct: isNum(s?.downPct) ? s.downPct : DOWNPAYMENT_PERCENT_DEFAULT,
+          monthsToPay: isNum(s?.monthsToPay) ? s.monthsToPay : DEFAULT_MONTHS_TO_PAY,
+          reservationFee: isNum(s?.reservationFee) ? s.reservationFee : RESERVATION_FEE_DEFAULT,
+          closingFeePct: isNum(s?.closingFeePct) ? s.closingFeePct : DEFAULT_CLOSING_FEE_PCT,
+          rate15yr: isNum(s?.rate15yr) ? s.rate15yr : DEFAULT_RATE_15YR,
+          rate20yr: isNum(s?.rate20yr) ? s.rate20yr : DEFAULT_RATE_20YR,
+        };
+
+        if (storedVersion < COMPARE_ADJUSTMENTS_VERSION) {
+          if (migrated.downPct === FORMER_DOWNPAYMENT_PERCENT_DEFAULT) {
+            migrated.downPct = DOWNPAYMENT_PERCENT_DEFAULT;
+          }
+          if (migrated.reservationFee === FORMER_RESERVATION_FEE_DEFAULT) {
+            migrated.reservationFee = RESERVATION_FEE_DEFAULT;
+          }
+        }
+
+        setDiscountPct(migrated.discountPct);
+        setDownPct(migrated.downPct);
+        setMonthsToPay(migrated.monthsToPay);
+        setReservationFee(migrated.reservationFee);
+        setClosingFeePct(migrated.closingFeePct);
+        setRate15yr(migrated.rate15yr);
+        setRate20yr(migrated.rate20yr);
+
+        // Persist the migrated payload immediately so future loads read it pre-migrated.
+        localStorage.setItem(
+          "compare_adjustments",
+          JSON.stringify({ version: COMPARE_ADJUSTMENTS_VERSION, ...migrated })
+        );
       }
-    } catch {}
+    } catch {
+      // Malformed stored data — fall back to the centralized defaults already set as initial state.
+    }
   }, []);
 
   useEffect(() => {
     if (!mounted) return;
     localStorage.setItem(
       "compare_adjustments",
-      JSON.stringify({ discountPct, downPct, monthsToPay, reservationFee, closingFeePct, rate15yr, rate20yr })
+      JSON.stringify({
+        version: COMPARE_ADJUSTMENTS_VERSION,
+        discountPct,
+        downPct,
+        monthsToPay,
+        reservationFee,
+        closingFeePct,
+        rate15yr,
+        rate20yr,
+      })
     );
   }, [mounted, discountPct, downPct, monthsToPay, reservationFee, closingFeePct, rate15yr, rate20yr]);
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Select from "react-select";
 import { matchesLegacyOrCanonical } from "@/lib/unit-id";
+import { RESERVATION_FEE_DEFAULT, DOWNPAYMENT_PERCENT_DEFAULT } from "@/lib/quoteDefaults";
 
 type UnitRow = {
   property_code: string;
@@ -66,9 +67,9 @@ export default function ComputationPage() {
 
   // Inputs
   const [discountPct, setDiscountPct] = useState<number>(0);
-  const [downPct, setDownPct] = useState<number>(20);
+  const [downPct, setDownPct] = useState<number>(DOWNPAYMENT_PERCENT_DEFAULT);
   const [monthsToPay, setMonthsToPay] = useState<number>(36);
-  const [reservationFee, setReservationFee] = useState<number>(20_000);
+  const [reservationFee, setReservationFee] = useState<number>(RESERVATION_FEE_DEFAULT);
   const [closingFeePct, setClosingFeePct] = useState<number>(10.5);
   const [rate15yr, setRate15yr] = useState<number>(6);
   const [rate20yr, setRate20yr] = useState<number>(6);
