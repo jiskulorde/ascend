@@ -137,9 +137,12 @@ export default function AvailabilityClient() {
   const [selectedAmenities, setSelectedAmenities] = useState<Option[]>([]);
   const [selectedFacing, setSelectedFacing] = useState<Option[]>([]);
   const [selectedProperty, setSelectedProperty] = useState<Option[]>([]);
+  const [selectedTower, setSelectedTower] = useState<Option[]>([]);
   const [selectedCity, setSelectedCity] = useState<Option[]>([]);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 10_000_000]);
   const [sizeRange, setSizeRange] = useState<[number, number]>([0, 500]);
+  const [minSizeInput, setMinSizeInput] = useState<string>("0");
+  const [maxSizeInput, setMaxSizeInput] = useState<string>("500");
 
   const [sortOption, setSortOption] = useState<string>("priceAsc");
   const [currentPage, setCurrentPage] = useState(1);
@@ -199,6 +202,39 @@ export default function AvailabilityClient() {
     localStorage.setItem("selectedUnits", JSON.stringify(Array.from(selectedUnits)));
   }, [selectedUnits]);
 
+  useEffect(() => {
+    setMinSizeInput(String(sizeRange[0]));
+    setMaxSizeInput(String(sizeRange[1]));
+  }, [sizeRange]);
+
+  const commitMinSize = () => {
+    const num = parseFloat(minSizeInput);
+    if (!Number.isFinite(num)) {
+      setMinSizeInput(String(sizeRange[0]));
+      return;
+    }
+    const clampedMin = Math.min(Math.max(num, minSqm), sizeRange[1]);
+    setSizeRange([clampedMin, sizeRange[1]]);
+    setCurrentPage(1);
+  };
+
+  const commitMaxSize = () => {
+    const num = parseFloat(maxSizeInput);
+    if (!Number.isFinite(num)) {
+      setMaxSizeInput(String(sizeRange[1]));
+      return;
+    }
+    const clampedMax = Math.max(Math.min(num, maxSqm), sizeRange[0]);
+    setSizeRange([sizeRange[0], clampedMax]);
+    setCurrentPage(1);
+  };
+
+  const handleSizeInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.currentTarget.blur();
+    }
+  };
+
   const searchMatches = (r: UnitRow) => {
     const q = searchTerm.trim().toLowerCase();
     if (!q) return true;
@@ -227,7 +263,7 @@ export default function AvailabilityClient() {
     return searchable.includes(q);
   };
 
-  const rowsAfter = (exclude: "property" | "city" | "status" | "type" | "amenities" | "facing") => {
+  const rowsAfter = (exclude: "property" | "tower" | "city" | "status" | "type" | "amenities" | "facing") => {
     return rows.filter((r) => {
       const priceOk = r.ListPrice >= priceRange[0] && r.ListPrice <= priceRange[1];
       const sqmOk = r.GrossAreaSQM >= sizeRange[0] && r.GrossAreaSQM <= sizeRange[1];
@@ -237,6 +273,11 @@ export default function AvailabilityClient() {
         exclude === "property" || selectedProperty.length === 0
           ? true
           : selectedProperty.some((pr) => pr.label === r.property_name);
+
+      const towerOk =
+        exclude === "tower" || selectedTower.length === 0
+          ? true
+          : selectedTower.some((t) => t.value === r.tower_name);
 
       const cityOk =
         exclude === "city" || selectedCity.length === 0
@@ -269,6 +310,7 @@ export default function AvailabilityClient() {
         sqmOk &&
         onlySelOk &&
         propertyOk &&
+        towerOk &&
         cityOk &&
         statusOk &&
         typeOk &&
@@ -284,38 +326,45 @@ export default function AvailabilityClient() {
     const vals = Array.from(new Set(rowsAfter("property").map((r) => r.property_name).filter(Boolean)));
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedCity, selectedStatus, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedTower, selectedCity, selectedStatus, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
+
+  const availableTowerOpts = useMemo(() => {
+    if (selectedProperty.length === 0) return [];
+    const vals = Array.from(new Set(rowsAfter("tower").map((r) => r.tower_name).filter(Boolean)));
+    return toOptions(vals);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedCity, selectedStatus, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
 
   const availableCityOpts = useMemo(() => {
     const vals = Array.from(new Set(rowsAfter("city").map((r) => r.city).filter(Boolean)));
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedStatus, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedTower, selectedStatus, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
 
   const availableStatusOpts = useMemo(() => {
     const vals = Array.from(new Set(rowsAfter("status").map((r) => r.Status).filter(Boolean)));
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedCity, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedTower, selectedCity, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
 
   const availableTypeOpts = useMemo(() => {
     const vals = Array.from(new Set(rowsAfter("type").map((r) => r.Type).filter(Boolean)));
     vals.sort(typeSort);
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedCity, selectedStatus, selectedAmenities, selectedFacing, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedTower, selectedCity, selectedStatus, selectedAmenities, selectedFacing, showOnlySelected]);
 
   const availableAmenityOpts = useMemo(() => {
     const vals = Array.from(new Set(rowsAfter("amenities").map((r) => r.Amenities).filter(Boolean)));
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedCity, selectedStatus, selectedType, selectedFacing, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedTower, selectedCity, selectedStatus, selectedType, selectedFacing, showOnlySelected]);
 
   const availableFacingOpts = useMemo(() => {
     const vals = Array.from(new Set(rowsAfter("facing").map((r) => r.Facing).filter(Boolean)));
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedCity, selectedStatus, selectedType, selectedAmenities, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedTower, selectedCity, selectedStatus, selectedType, selectedAmenities, showOnlySelected]);
 
   useEffect(() => {
     const prune = (selected: Option[], avail: Option[], setter: (v: Option[]) => void) => {
@@ -325,6 +374,7 @@ export default function AvailabilityClient() {
     };
 
     prune(selectedProperty, availablePropertyOpts, setSelectedProperty);
+    prune(selectedTower, availableTowerOpts, setSelectedTower);
     prune(selectedCity, availableCityOpts, setSelectedCity);
     prune(selectedStatus, availableStatusOpts, setSelectedStatus);
     prune(selectedType, availableTypeOpts, setSelectedType);
@@ -332,12 +382,14 @@ export default function AvailabilityClient() {
     prune(selectedFacing, availableFacingOpts, setSelectedFacing);
   }, [
     availablePropertyOpts,
+    availableTowerOpts,
     availableCityOpts,
     availableStatusOpts,
     availableTypeOpts,
     availableAmenityOpts,
     availableFacingOpts,
     selectedProperty,
+    selectedTower,
     selectedCity,
     selectedStatus,
     selectedType,
@@ -352,6 +404,7 @@ export default function AvailabilityClient() {
       const amenMatch = selectedAmenities.length ? selectedAmenities.some((a) => a.value === r.Amenities) : true;
       const facingMatch = selectedFacing.length ? selectedFacing.some((f) => f.value === r.Facing) : true;
       const propertyMatch = selectedProperty.length ? selectedProperty.some((pr) => pr.label === r.property_name) : true;
+      const towerMatch = selectedTower.length ? selectedTower.some((t) => t.value === r.tower_name) : true;
       const cityMatch = selectedCity.length ? selectedCity.some((c) => c.label === r.city) : true;
       const priceMatch = r.ListPrice >= priceRange[0] && r.ListPrice <= priceRange[1];
       const sqmMatch = r.GrossAreaSQM >= sizeRange[0] && r.GrossAreaSQM <= sizeRange[1];
@@ -364,6 +417,7 @@ export default function AvailabilityClient() {
         amenMatch &&
         facingMatch &&
         propertyMatch &&
+        towerMatch &&
         cityMatch &&
         priceMatch &&
         sqmMatch &&
@@ -399,6 +453,7 @@ export default function AvailabilityClient() {
     selectedAmenities,
     selectedFacing,
     selectedProperty,
+    selectedTower,
     selectedCity,
     priceRange,
     sizeRange,
@@ -421,6 +476,7 @@ export default function AvailabilityClient() {
     count += selectedAmenities.length;
     count += selectedFacing.length;
     count += selectedProperty.length;
+    count += selectedTower.length;
     count += selectedCity.length;
 
     if (priceRange[0] !== 0 || priceRange[1] !== maxPrice) count += 1;
@@ -435,6 +491,7 @@ export default function AvailabilityClient() {
     selectedAmenities,
     selectedFacing,
     selectedProperty,
+    selectedTower,
     selectedCity,
     priceRange,
     sizeRange,
@@ -457,6 +514,7 @@ export default function AvailabilityClient() {
     setSelectedAmenities([]);
     setSelectedFacing([]);
     setSelectedProperty([]);
+    setSelectedTower([]);
     setSelectedCity([]);
     setPriceRange([0, maxPrice || 10_000_000]);
     setSizeRange([minSqm, maxSqm || 500]);
@@ -470,11 +528,12 @@ export default function AvailabilityClient() {
       minHeight: 38,
       borderRadius: 14,
       borderColor: state.isFocused ? "#1f3f93" : "#d8e0ec",
-      backgroundColor: "#ffffff",
+      backgroundColor: state.isDisabled ? "#f8fafc" : "#ffffff",
       boxShadow: state.isFocused ? "0 0 0 3px rgba(31,63,147,0.10)" : "0 1px 2px rgba(15,23,42,0.04)",
-      cursor: "pointer",
+      cursor: state.isDisabled ? "not-allowed" : "pointer",
+      opacity: state.isDisabled ? 0.7 : 1,
       transition: "all 150ms ease",
-      "&:hover": { borderColor: "#b7c4d8" },
+      "&:hover": { borderColor: state.isDisabled ? "#d8e0ec" : "#b7c4d8" },
     }),
     valueContainer: (p: any) => ({
       ...p,
@@ -603,6 +662,21 @@ export default function AvailabilityClient() {
 
           <Select
             isMulti
+            instanceId={`avail-tower-${ctx}`}
+            options={availableTowerOpts}
+            value={selectedTower}
+            onChange={(v) => {
+              setSelectedTower(Array.from(v as readonly Option[]));
+              setCurrentPage(1);
+            }}
+            placeholder={selectedProperty.length === 0 ? "Select project first" : "Tower"}
+            isDisabled={selectedProperty.length === 0}
+            styles={selectStyles}
+            menuPortalTarget={typeof window !== "undefined" ? document.body : undefined}
+          />
+
+          <Select
+            isMulti
             instanceId={`avail-city-${ctx}`}
             options={availableCityOpts}
             value={selectedCity}
@@ -707,10 +781,48 @@ export default function AvailabilityClient() {
             />
           </RangeBox>
 
-          <RangeBox label="Size" value={`${sizeRange[0]} – ${sizeRange[1]} sqm`}>
+          <RangeBox label="Size (sqm)" value={`${sizeRange[0]} – ${sizeRange[1]} sqm`}>
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Min
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min={minSqm}
+                  max={maxSqm}
+                  value={minSizeInput}
+                  onChange={(e) => setMinSizeInput(e.target.value)}
+                  onBlur={commitMinSize}
+                  onKeyDown={handleSizeInputKeyDown}
+                  className="h-9 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-[#1f3f93] focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Max
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min={minSqm}
+                  max={maxSqm}
+                  value={maxSizeInput}
+                  onChange={(e) => setMaxSizeInput(e.target.value)}
+                  onBlur={commitMaxSize}
+                  onKeyDown={handleSizeInputKeyDown}
+                  className="h-9 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-[#1f3f93] focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+            </div>
+
             {maxSqm > minSqm ? (
               <Range
-                step={1}
+                step={0.1}
                 min={minSqm}
                 max={maxSqm || 500}
                 values={sizeRange}
