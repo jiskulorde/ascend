@@ -234,13 +234,13 @@ export default function ComputationPage() {
     dpMonthly * rtoAdvanceDpMonths;
 
   // ---- compact spacing helpers ----
-  const td = "py-1.5 px-2";     // consistent compact cell padding
-  const tdTight = "py-1 px-2";  // even tighter for small labels
+  const td = "py-[3px] px-2";    // consistent compact cell padding
+  const tdTight = "py-0.5 px-2"; // even tighter for small labels
   const sectionPad = "px-3 py-2";
 
   // ---- robust capture for PNG/PDF (crisp & consistent) ----
   // We temporarily set a fixed export width so downloads look identical across devices.
-  const EXPORT_WIDTH = 980; // px (nice on A4 after scaling, readable on phones)
+  const EXPORT_WIDTH = 480; // px — narrow/portrait so PNG/PDF reads naturally on a phone screen
   const withSheetFrozen = async <T,>(work: () => Promise<T>): Promise<T> => {
     if (!sheetRef.current) return work();
     const node = sheetRef.current;
@@ -249,14 +249,28 @@ export default function ComputationPage() {
       maxWidth: node.style.maxWidth,
       boxShadow: node.style.boxShadow,
       transform: node.style.transform,
+      borderRadius: node.style.borderRadius,
     };
     node.style.width = `${EXPORT_WIDTH}px`;
     node.style.maxWidth = "none";
     node.style.boxShadow = "none";        // avoids shadow cut-offs
     node.style.transform = "none";        // avoid scaled parent issues
+    // html-to-image's SVG-based capture can't be trusted to clip rounded corners
+    // consistently across browsers; force hard corners for export so all 4 sides match.
+    node.style.borderRadius = "0";
     document.body.classList.add("exporting"); // if you want to target global tweaks
+    // RTO capture has several stacked sub-blocks (Cash-Out, Turnover, Bank Financing) that make
+    // it much taller than Standard; this extra marker lets export-only CSS compact RTO specifically
+    // without touching Standard export or the live UI.
+    const isRtoExport = mode === "RTO";
+    if (isRtoExport) document.body.classList.add("exporting-rto");
     // give the browser a tick to reflow
     await new Promise((r) => requestAnimationFrame(() => r(null as any)));
+    // wait for webfonts so capture doesn't race Poppins loading; never hang if the API misbehaves
+    await Promise.race([
+      document.fonts?.ready ?? Promise.resolve(),
+      new Promise((r) => setTimeout(r, 1500)),
+    ]);
     try {
       return await work();
     } finally {
@@ -264,7 +278,9 @@ export default function ComputationPage() {
       node.style.maxWidth = prev.maxWidth;
       node.style.boxShadow = prev.boxShadow;
       node.style.transform = prev.transform;
+      node.style.borderRadius = prev.borderRadius;
       document.body.classList.remove("exporting");
+      if (isRtoExport) document.body.classList.remove("exporting-rto");
     }
   };
 
@@ -463,9 +479,9 @@ export default function ComputationPage() {
       </aside>
 
       {/* Main */}
-      <section className="flex-1 flex flex-col items-center p-4 md:pl-0 overflow-auto">
+      <section className="flex-1 flex flex-col items-center p-4 pb-24 md:pb-4 md:pl-0 overflow-auto">
         {/* Unit picker + mode */}
-        <div className="bg-white rounded-xl p-3 shadow-sm border w-full max-w-[760px] sm:max-w-[860px] md:max-w-[980px] xl:max-w-[1100px] mb-3">
+        <div className="bg-white rounded-xl p-3 shadow-sm border w-full max-w-[480px] mb-2">
           <p className="font-semibold mb-2 text-blue-900">Select a unit to compute</p>
           <Select
             instanceId="comp-unit-select"
@@ -510,7 +526,7 @@ export default function ComputationPage() {
 
         {/* Error */}
         {loadError && (
-          <div className="w-full max-w-[760px] sm:max-w-[860px] md:max-w-[980px] xl:max-w-[1100px] mb-3">
+          <div className="w-full max-w-[480px] mb-3">
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
               <div className="font-semibold mb-1">Couldn’t load availability.</div>
               <div className="opacity-80 break-all">{loadError}</div>
@@ -523,40 +539,40 @@ export default function ComputationPage() {
 
         {/* Sheet */}
         {selectedUnit ? (
-          <div className="w-full max-w-[760px] sm:max-w-[860px] md:max-w-[980px] xl:max-w-[1100px] flex flex-col items-center space-y-3">
+          <div className="w-full max-w-[480px] flex flex-col items-center space-y-3">
             <div ref={sheetRef} className="bg-white rounded-xl shadow-md w-full border overflow-hidden">
               {/* Top banner for RTO */}
               {mode === "RTO" && (
-                <div className="px-3 py-1 bg-red-600 text-white font-extrabold tracking-wide text-center">
+                <div className="px-3 py-0.5 bg-red-600 text-white font-extrabold tracking-wide text-center leading-tight">
                   RENT TO OWN — COMPUTATION
                 </div>
               )}
 
               {/* Header */}
-              <div className="bg-blue-900 text-white py-3">
+              <div className="bg-blue-900 text-white py-2">
                 <h1 className="px-3 text-xl md:text-2xl font-bold">{selectedUnit.property_name}</h1>
                 <p className="px-3 mt-0.5 text-blue-100 text-[13px]">{selectedUnit.address || selectedUnit.city}</p>
               </div>
 
               {/* Validity */}
-              <div className="px-3 py-1.5 border-b">
+              <div className="px-3 py-[3px] border-b leading-tight">
                 <span className="text-[12px] font-semibold text-red-600">{validityText}</span>
               </div>
 
               {/* Unit meta */}
-              <div className="px-3 py-1.5 border-b text-[12.5px] grid sm:grid-cols-3 gap-2 bg-[#fcfdff]">
+              <div className="px-3 py-[3px] border-b text-[12.5px] leading-tight grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 bg-[#fcfdff]">
                 <div>Turnover date: <span className="font-semibold text-blue-900">{selectedUnit.RFODate || "TBA"}</span></div>
                 <div>Building | Unit type: <span className="font-semibold text-blue-900">{selectedUnit.BuildingUnit} | {selectedUnit.Type}</span></div>
                 <div>Total area: <span className="font-semibold text-blue-900">{selectedUnit.GrossAreaSQM} sqm</span></div>
               </div>
 
               {/* Table */}
-              <div className="p-0">
-                <table className="w-full text-[13px] border-collapse">
+              <div className="pb-2 rto-bottom-pad">
+                <table className="w-full text-[13px] border-collapse rounded-none shadow-none overflow-visible">
                   <tbody>
                     <tr className="py-0.5 border-b">
                       <td className={td}>List Price:</td>
-                      <td className={`${td} text-right font-semibold text-blue-900`}>{fmtPhp(selectedUnit.ListPrice)}</td>
+                      <td className={`${td} text-right font-semibold text-blue-900 ph-currency`}>{fmtPhp(selectedUnit.ListPrice)}</td>
                     </tr>
                     
                     {/* Special Discount highlight */}
@@ -571,7 +587,7 @@ export default function ComputationPage() {
           <span className="text-[12px] text-red-700 px-2 py-1 rounded font-extrabold">
             {discountPct}%
           </span>
-          <span className="text-sm text-red-700">
+          <span className="text-sm text-red-700 ph-currency">
             −{fmtPhp(discountSavings)}
           </span>
         </div>
@@ -588,28 +604,28 @@ export default function ComputationPage() {
 
                     <tr className="py-0.5 border-b bg-gray-50 font-semibold text-blue-900">
                       <td className={td}>Total Contract Price:</td>
-                      <td className={`${td} text-right text-[18px]`}>{fmtPhp(TCP)}</td>
+                      <td className={`${td} text-right text-[18px] font-bold ph-currency`}>{fmtPhp(TCP)}</td>
                     </tr>
                     <tr className="py-0.5 border-b">
                       <td className={td}>Reservation Fee:</td>
-                      <td className={`${td} text-right`}>{fmtPhp(reservationFee)}</td>
+                      <td className={`${td} text-right ph-currency`}>{fmtPhp(reservationFee)}</td>
                     </tr>
                     <tr className="py-0.5 border-b bg-gray-50">
                       <td className={td}>Downpayment <span className="text-xs text-muted-foreground">({downPct}%)</span>:</td>
-                      <td className={`${td} text-right`}>{fmtPhp(dpAmount)}</td>
+                      <td className={`${td} text-right ph-currency`}>{fmtPhp(dpAmount)}</td>
                     </tr>
 
                     {/* Net DP highlight */}
                     <tr className="py-0.5 border-b">
                       <td className="p-0" colSpan={2}>
                         <div className="flex items-stretch justify-between rounded-md overflow-hidden">
-                          <div className="flex-1 bg-blue-100 p-2 text-[13px]">
+                          <div className="flex-1 min-w-0 bg-blue-100 p-1 text-[13px]">
                             <div className="font-semibold text-blue-900">Net Downpayment Payable in:</div>
                             <div className="text-[11px] text-blue-800">*starts one month after reservation date</div>
                           </div>
-                          <div className="flex items-center gap-2 bg-blue-100 px-3">
+                          <div className="flex items-center gap-2 bg-blue-100 px-3 shrink-0">
                             <span className="text-[12px] bg-blue-200 px-2 py-1 rounded font-medium">{monthsToPay} Mos.</span>
-                            <span className="text-xl font-extrabold text-blue-900">{fmtPhp(dpMonthly)}</span>
+                            <span className="ph-currency text-[22px] font-extrabold text-blue-900">{fmtPhp(dpMonthly)}</span>
                           </div>
                         </div>
                       </td>
@@ -620,37 +636,46 @@ export default function ComputationPage() {
                       <>
                         <tr className="py-0.5 border-b">
                           <td className={td}>Rent To Own Rate: <span className="text-xs text-muted-foreground">(incl. assoc. dues)</span></td>
-                          <td className={`${td} text-right font-semibold text-[18px] text-blue-900`}>{fmtPhp(rtoRate)}</td>
+                          <td className={`${td} text-right font-semibold text-[18px] text-blue-900 ph-currency`}>{fmtPhp(rtoRate)}</td>
                         </tr>
-                        <tr className="py-0.5 border-b bg-yellow-50">
-                          <td className={`${td} font-semibold`}>TOTAL Down Payment + Rent to Own <span className="text-xs text-muted-foreground">(per month)</span>:</td>
-                          <td className={`${td} text-right bg-yellow-100 rounded-md text-yellow-900 font-extrabold text-2xl`}>{fmtPhp(rtoTotalMonthly)}</td>
+                        <tr className="py-0.5 border-b">
+                          <td className="p-0" colSpan={2}>
+                            <div className="flex items-stretch justify-between rounded-md overflow-hidden bg-blue-700">
+                              <div className="flex-1 min-w-0 p-1 text-[13px] text-white rto-total-label">
+                                <div className="font-semibold">TOTAL Down Payment + Rent to Own</div>
+                                <div className="text-[11px] text-blue-100">per month</div>
+                              </div>
+                              <div className="flex items-center px-3 shrink-0 rto-total-amt">
+                                <span className="ph-currency text-[22px] font-extrabold text-white">{fmtPhp(rtoTotalMonthly)}</span>
+                              </div>
+                            </div>
+                          </td>
                         </tr>
 
                         {/* Cash-out to Move-in */}
                         <tr>
                           <td colSpan={2} className="p-0">
-                            <div className="mt-2 rounded-lg border overflow-hidden">
-                              <div className="px-2 py-1 bg-slate-200 font-medium">CASH OUT TO MOVE-IN (One-time)</div>
-                              <div className="px-3 py-1 flex items-center justify-between text-sm">
+                            <div className="mt-1 rounded-lg border overflow-hidden rto-cashout-wrap">
+                              <div className="px-2 py-0.5 bg-slate-200 font-medium leading-tight rto-cashout-header">CASH OUT TO MOVE-IN (One-time)</div>
+                              <div className="px-3 py-0.5 flex items-center justify-between text-sm leading-tight rto-cashout-row">
                                 <span>1 Month Advance Rent</span>
-                                <span>{fmtPhp(rtoRate * rtoAdvanceRentMonths)}</span>
+                                <span className="ph-currency">{fmtPhp(rtoRate * rtoAdvanceRentMonths)}</span>
                               </div>
-                              <div className="px-3 py-1 flex items-center justify-between text-sm">
+                              <div className="px-3 py-0.5 flex items-center justify-between text-sm leading-tight rto-cashout-row">
                                 <span>2 Months Security Deposit</span>
-                                <span>{fmtPhp(rtoRate * rtoSecurityDepositMonths)}</span>
+                                <span className="ph-currency">{fmtPhp(rtoRate * rtoSecurityDepositMonths)}</span>
                               </div>
-                              <div className="px-3 py-1 flex items-center justify-between text-sm">
+                              <div className="px-3 py-0.5 flex items-center justify-between text-sm leading-tight rto-cashout-row">
                                 <span>Utility Bill Deposit</span>
-                                <span>{fmtPhp(RTO_UTILITY_DEPOSIT_PHP)}</span>
+                                <span className="ph-currency">{fmtPhp(RTO_UTILITY_DEPOSIT_PHP)}</span>
                               </div>
-                              <div className="px-3 py-1 flex items-center justify-between text-sm">
+                              <div className="px-3 py-0.5 flex items-center justify-between text-sm leading-tight rto-cashout-row">
                                 <span>Down Payment (Advance {rtoAdvanceDpMonths} mos)</span>
-                                <span>{fmtPhp(dpMonthly * rtoAdvanceDpMonths)}</span>
+                                <span className="ph-currency">{fmtPhp(dpMonthly * rtoAdvanceDpMonths)}</span>
                               </div>
-                              <div className="px-3 py-1 flex items-center justify-between bg-yellow-50">
+                              <div className="px-3 py-1 flex items-center justify-between bg-blue-50 rto-cashout-total">
                                 <span className="font-semibold text-[16px]">Total Cash-Out</span>
-                                <b className="text-yellow-900 text-[16px]">{fmtPhp(rtoCashOutMoveIn)}</b>
+                                <b className="ph-currency text-blue-900 text-[17px] font-extrabold">{fmtPhp(rtoCashOutMoveIn)}</b>
                               </div>
                             </div>
                           </td>
@@ -659,15 +684,15 @@ export default function ComputationPage() {
                         {/* Due upon Turnover */}
                         <tr>
                           <td colSpan={2} className="p-0">
-                            <div className="mt-2 rounded-lg border overflow-hidden">
-                              <div className="px-3 py-2 bg-slate-200 font-medium">DUE UPON TURNOVER (after {monthsToPay} months)</div>
-                              <div className="px-3 py-2 flex items-center justify-between text-sm">
+                            <div className="mt-1 rounded-lg border overflow-hidden rto-turnover-wrap">
+                              <div className="px-3 py-0.5 bg-slate-200 font-medium leading-tight rto-turnover-header">DUE UPON TURNOVER (after {monthsToPay} months)</div>
+                              <div className="px-3 py-0.5 flex items-center justify-between text-sm leading-tight rto-turnover-row">
                                 <span>Closing Fees <span className="text-xs text-muted-foreground">({closingFeePct}%)</span></span>
-                                <b>{fmtPhp(closingFee)}</b>
+                                <b className="ph-currency">{fmtPhp(closingFee)}</b>
                               </div>
-                              <div className="px-3 py-2 flex items-center justify-between text-sm">
+                              <div className="px-3 py-0.5 flex items-center justify-between text-sm leading-tight rto-turnover-row">
                                 <span>Turnover Fees (estimate)</span>
-                                <b>{fmtPhp(turnoverFees)}</b>
+                                <b className="ph-currency">{fmtPhp(turnoverFees)}</b>
                               </div>
                             </div>
                           </td>
@@ -682,10 +707,10 @@ export default function ComputationPage() {
                           <td className={td}>
                             Closing Fee <span className="text-xs text-muted-foreground">({closingFeePct}%)</span>:
                           </td>
-                          <td className={`${td} text-right`}>{fmtPhp(closingFee)}</td>
+                          <td className={`${td} text-right ph-currency`}>{fmtPhp(closingFee)}</td>
                         </tr>
                         <tr>
-                          <td className="px-4 pb-3 text-[11px] text-muted-foreground" colSpan={2}>
+                          <td className="px-3 pb-2 text-[11px] text-muted-foreground leading-tight" colSpan={2}>
                             *Covers Title fees &amp; other government fees • *Payable upon turnover • *Can be included in bank loan
                           </td>
                         </tr>
@@ -693,26 +718,26 @@ export default function ComputationPage() {
                     )}
 
                     <tr className="border-t bg-gray-50 font-semibold">
-                      <td className={td}>Balance Bank Financing:</td>
-                      <td className={`${td} text-right text-blue-900`}>{fmtPhp(bankBalance)}</td>
+                      <td className={`${td} rto-balance-cell`}>Balance Bank Financing:</td>
+                      <td className={`${td} text-right text-blue-900 text-[16px] font-bold ph-currency rto-balance-cell`}>{fmtPhp(bankBalance)}</td>
                     </tr>
                   </tbody>
                 </table>
 
                 {/* Bank Financing */}
-                <div className="mt-4 border-t pt-2">
-                  <div className="flex items-center justify-between">
+                <div className="mt-2 border-t pt-1.5 rto-bankfin-wrap">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 rto-bankfin-headrow">
                     <p className="px-2 font-semibold text-blue-900">Bank Financing</p>
-                    <p className="text-[11px] text-muted-foreground">*Subject to bank’s prevailing rate at time of loan</p>
+                    <p className="px-2 sm:px-0 text-[11px] text-muted-foreground leading-tight">*Subject to bank’s prevailing rate at time of loan</p>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div className="rounded-lg border p-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1 rto-bankfin-grid">
+                    <div className="rounded-lg border px-2 py-1.5 rto-bankfin-card">
                       <div className="text-xs text-muted-foreground">20 years @ {rate20yr}%</div>
-                      <div className="text-right font-semibold text-blue-900">{fmtPhp(monthly20)}</div>
+                      <div className="text-right text-[16px] font-bold text-blue-900 ph-currency">{fmtPhp(monthly20)}</div>
                     </div>
-                    <div className="rounded-lg border p-2">
+                    <div className="rounded-lg border px-2 py-1.5 rto-bankfin-card">
                       <div className="text-xs text-muted-foreground">15 years @ {rate15yr}%</div>
-                      <div className="text-right font-semibold text-blue-900">{fmtPhp(monthly15)}</div>
+                      <div className="text-right text-[16px] font-bold text-blue-900 ph-currency">{fmtPhp(monthly15)}</div>
                     </div>
                   </div>
                 </div>
@@ -750,7 +775,7 @@ export default function ComputationPage() {
           <div className="absolute left-0 right-0 bottom-0 max-h-[85vh] bg-white rounded-t-2xl shadow-2xl">
             <div className="flex items-center justify-between px-4 py-3 border-b rounded-t-2xl">
               <div className="font-semibold">Adjustments</div>
-              <button onClick={() => setIsAdjustOpen(false)} className="rounded-lg border px-3 py-1 text-sm hover:bg-gray-50">Done</button>
+              <button onClick={() => setIsAdjustOpen(false)} className="rounded-lg border px-4 py-2 text-sm hover:bg-gray-50">Done</button>
             </div>
 
             <div className="p-4 overflow-y-auto space-y-4">

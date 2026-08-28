@@ -141,6 +141,75 @@ tbody tr { @apply bg-card hover:bg-muted/40 transition; }
 /* ---------- Section spacing ---------- */
 .section { @apply py-12 px-6 md:px-12; }
 
+/* ---------- Currency glyph consistency (quotation/export surfaces) ---------- */
+/* Poppins has no U+20B1 (₱) glyph; without this the browser silently swaps fonts
+   mid-string for the peso sign only, which looks mismatched next to the digits. */
+.ph-currency {
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---------- RTO PNG/PDF export compaction (capture-only) ---------- */
+/* Active only while <body> carries BOTH .exporting and .exporting-rto — i.e. only during an
+   actual PNG/PDF capture taken while RTO mode is on (see withSheetFrozen in
+   computation/[unitID]/page.tsx). Never applies to the live UI or to a Standard-mode export.
+   !important is used deliberately: this must reliably override Tailwind utility padding/margin
+   for the duration of the capture only, regardless of layer ordering. */
+body.exporting.exporting-rto table td:not(.p-0) {
+  padding: 1px 8px !important;
+}
+body.exporting.exporting-rto .rto-total-label {
+  padding: 2px 6px !important;
+}
+body.exporting.exporting-rto .rto-total-amt {
+  padding: 0 8px !important;
+}
+body.exporting.exporting-rto .rto-cashout-wrap {
+  margin-top: 0 !important;
+}
+body.exporting.exporting-rto .rto-cashout-header {
+  padding: 0 6px !important;
+  line-height: 1.15 !important;
+}
+body.exporting.exporting-rto .rto-cashout-row {
+  padding: 0 8px !important;
+}
+body.exporting.exporting-rto .rto-cashout-total {
+  padding: 1px 8px !important;
+}
+body.exporting.exporting-rto .rto-turnover-wrap {
+  margin-top: 0 !important;
+}
+body.exporting.exporting-rto .rto-turnover-header {
+  padding: 0 8px !important;
+  line-height: 1.15 !important;
+}
+body.exporting.exporting-rto .rto-turnover-row {
+  padding: 0 8px !important;
+}
+/* Balance Bank Financing row: more specific than the generic td rule above so it can go
+   tighter than the rest of the (untouched) upper rows that rule also covers. */
+body.exporting.exporting-rto td.rto-balance-cell {
+  padding: 0 8px !important;
+}
+body.exporting.exporting-rto .rto-bankfin-headrow {
+  gap: 0 !important;
+  margin-bottom: 1px !important;
+}
+body.exporting.exporting-rto .rto-bankfin-wrap {
+  margin-top: 2px !important;
+  padding-top: 2px !important;
+}
+body.exporting.exporting-rto .rto-bankfin-grid {
+  margin-top: 2px !important;
+  gap: 4px !important;
+}
+body.exporting.exporting-rto .rto-bankfin-card {
+  padding: 2px 6px !important;
+}
+body.exporting.exporting-rto .rto-bottom-pad {
+  padding-bottom: 2px !important;
+}
+
 /* ---------- Nice gradient header utility (optional) ---------- */
 .brand-hero {
   background: radial-gradient(1200px 400px at 50% -10%, color-mix(in oklab, var(--primary) 40%, white) 10%, transparent 60%),

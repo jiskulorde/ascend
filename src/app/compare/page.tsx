@@ -136,8 +136,9 @@ export default function ComparePage() {
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [floatingDocked, setFloatingDocked] = useState(true);
 
-  // export ref
+  // export refs
   const sheetRef = useRef<HTMLDivElement | null>(null);
+  const tableRef = useRef<HTMLTableElement | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -339,48 +340,127 @@ export default function ComparePage() {
     ["Facing",           (u) => u.Facing],
     ["Status",           (u) => u.Status],
     ["RFO Date",         (u) => u.RFODate],
-    ["List Price",       (u) => fmtPhp(u.ListPrice)],
-    ["Price / SQM",      (u) => fmtPhp(u.PerSQM)],
+    ["List Price",       (u) => <span className="ph-currency">{fmtPhp(u.ListPrice)}</span>],
+    ["Price / SQM",      (u) => <span className="ph-currency">{fmtPhp(u.PerSQM)}</span>],
     ["—",                ()  => "—"],
     ["Discount %",       ()  => `${discountPct}%`],
-    ["Total Contract Price", (u) => fmtPhp(compute(u).TCP)],
+    ["Total Contract Price", (u) => <span className="ph-currency">{fmtPhp(compute(u).TCP)}</span>],
     ["Downpayment %",    ()  => `${downPct}%`],
-    ["Downpayment",      (u) => fmtPhp(compute(u).dpAmount)],
-    ["Reservation Fee",  ()  => fmtPhp(reservationFee)],
-    ["Net DP",           (u) => fmtPhp(compute(u).netDp)],
+    ["Downpayment",      (u) => <span className="ph-currency">{fmtPhp(compute(u).dpAmount)}</span>],
+    ["Reservation Fee",  ()  => <span className="ph-currency">{fmtPhp(reservationFee)}</span>],
+    ["Net DP",           (u) => <span className="ph-currency">{fmtPhp(compute(u).netDp)}</span>],
     ["Months to Pay",    ()  => monthsToPay],
-    ["DP Monthly",       (u) => fmtPhp(compute(u).dpMonthly)],
+    ["DP Monthly",       (u) => <span className="ph-currency">{fmtPhp(compute(u).dpMonthly)}</span>],
     ["Closing Fee %",    ()  => `${closingFeePct}%`],
-    ["Closing Fee",      (u) => fmtPhp(compute(u).closingFee)],
-    ["Bank Balance",     (u) => fmtPhp(compute(u).bankBalance)],
-    [`15yrs @ ${rate15yr}%`, (u) => fmtPhp(compute(u).monthly15)],
-    [`20yrs @ ${rate20yr}%`, (u) => fmtPhp(compute(u).monthly20)],
+    ["Closing Fee",      (u) => <span className="ph-currency">{fmtPhp(compute(u).closingFee)}</span>],
+    ["Bank Balance",     (u) => <span className="ph-currency">{fmtPhp(compute(u).bankBalance)}</span>],
+    [`15yrs @ ${rate15yr}%`, (u) => <span className="ph-currency">{fmtPhp(compute(u).monthly15)}</span>],
+    [`20yrs @ ${rate20yr}%`, (u) => <span className="ph-currency">{fmtPhp(compute(u).monthly20)}</span>],
   ];
 
   // ---------------- Exports
+  // The live table stretches to fill whatever viewport it's on (min-w-full inside a
+  // wide desktop container), so capturing it as-is can produce an excessively wide,
+  // sparse export. Freeze it to its own content width during capture instead.
+  const COMPARE_EXPORT_MAX_WIDTH = 1400;
+  const withSheetFrozen = async <T,>(work: () => Promise<T>): Promise<T> => {
+    const node = sheetRef.current;
+    if (!node) return work();
+    const table = tableRef.current;
+    const prevNode = {
+      width: node.style.width,
+      maxWidth: node.style.maxWidth,
+      boxShadow: node.style.boxShadow,
+      overflow: node.style.overflow,
+    };
+    const prevTable = table ? { width: table.style.width, minWidth: table.style.minWidth } : null;
+
+    if (table) {
+      table.style.minWidth = "0";
+      table.style.width = "max-content";
+    }
+    node.style.overflow = "visible";
+    document.body.classList.add("exporting");
+    await new Promise((r) => requestAnimationFrame(() => r(null as any)));
+
+    const naturalWidth = Math.min(node.scrollWidth, COMPARE_EXPORT_MAX_WIDTH);
+    node.style.width = `${naturalWidth}px`;
+    node.style.maxWidth = "none";
+    node.style.boxShadow = "none";
+    await new Promise((r) => requestAnimationFrame(() => r(null as any)));
+
+    // wait for webfonts so capture doesn't race Poppins loading; never hang if the API misbehaves
+    await Promise.race([
+      document.fonts?.ready ?? Promise.resolve(),
+      new Promise((r) => setTimeout(r, 1500)),
+    ]);
+
+    try {
+      return await work();
+    } finally {
+      node.style.width = prevNode.width;
+      node.style.maxWidth = prevNode.maxWidth;
+      node.style.boxShadow = prevNode.boxShadow;
+      node.style.overflow = prevNode.overflow;
+      if (table && prevTable) {
+        table.style.width = prevTable.width;
+        table.style.minWidth = prevTable.minWidth;
+      }
+      document.body.classList.remove("exporting");
+    }
+  };
+
   const downloadPNG = async () => {
     if (!sheetRef.current) return;
     const { toPng } = await import("html-to-image");
-    const url = await toPng(sheetRef.current, { cacheBust: true, pixelRatio: 2 });
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "unit-comparison.png";
-    a.click();
+    await withSheetFrozen(async () => {
+      const node = sheetRef.current!;
+      const width = Math.max(node.scrollWidth, 1);
+      const height = Math.max(node.scrollHeight, node.offsetHeight);
+      const url = await toPng(node, {
+        cacheBust: true,
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
+        width,
+        height,
+        style: { transform: "none" },
+      });
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "unit-comparison.png";
+      a.click();
+    });
   };
 
   const downloadPDF = async () => {
     if (!sheetRef.current) return;
     const { toPng } = await import("html-to-image");
-    const imgData = await toPng(sheetRef.current, { cacheBust: true, pixelRatio: 2 });
     const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF({ orientation: "l", unit: "pt", format: "a4" });
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const img = new Image();
-    img.src = imgData;
-    await new Promise(res => (img.onload = res));
-    const scale = pageWidth / img.width;
-    pdf.addImage(imgData, "PNG", 0, 0, pageWidth, img.height * scale);
-    pdf.save("unit-comparison.pdf");
+    await withSheetFrozen(async () => {
+      const node = sheetRef.current!;
+      const imgW = Math.max(node.scrollWidth, 1);
+      const imgH = Math.max(node.scrollHeight, node.offsetHeight);
+      const imgData = await toPng(node, {
+        cacheBust: true,
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
+        width: imgW,
+        height: imgH,
+        style: { transform: "none" },
+      });
+
+      const pdf = new jsPDF({ orientation: imgW >= imgH ? "l" : "p", unit: "pt", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const scale = Math.min(pageW / imgW, pageH / imgH);
+      const drawW = imgW * scale;
+      const drawH = imgH * scale;
+      const x = (pageW - drawW) / 2;
+      const y = (pageH - drawH) / 2;
+
+      pdf.addImage(imgData, "PNG", x, y, drawW, drawH);
+      pdf.save("unit-comparison.pdf");
+    });
   };
 
   const downloadExcel = async () => {
@@ -599,7 +679,7 @@ export default function ComparePage() {
               )}
 
               {comparedUnits.length > 0 && (
-                <table className="min-w-full text-sm">
+                <table ref={tableRef} className="min-w-full text-sm">
                   <thead>
                     <tr className="bg-[#0f172a] text-white">
                       <th className="sticky left-0 z-10 bg-[#0f172a] text-left px-3 py-3">Field</th>
@@ -724,15 +804,15 @@ export default function ComparePage() {
                         <div className="px-3 py-2 bg-slate-50 font-medium">Pricing</div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>List Price</span>
-                          <b>{fmtPhp(u.ListPrice)}</b>
+                          <b className="ph-currency">{fmtPhp(u.ListPrice)}</b>
                         </div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>Price / SQM</span>
-                          <b>{fmtPhp(u.PerSQM)}</b>
+                          <b className="ph-currency">{fmtPhp(u.PerSQM)}</b>
                         </div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>TCP (disc {discountPct}%)</span>
-                          <b>{fmtPhp(c.TCP)}</b>
+                          <b className="ph-currency">{fmtPhp(c.TCP)}</b>
                         </div>
                       </div>
 
@@ -740,19 +820,19 @@ export default function ComparePage() {
                         <div className="px-3 py-2 bg-slate-50 font-medium">Downpayment</div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>DP {downPct}%</span>
-                          <b>{fmtPhp(c.dpAmount)}</b>
+                          <b className="ph-currency">{fmtPhp(c.dpAmount)}</b>
                         </div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>Reservation</span>
-                          <b>{fmtPhp(reservationFee)}</b>
+                          <b className="ph-currency">{fmtPhp(reservationFee)}</b>
                         </div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>Net DP</span>
-                          <b>{fmtPhp(c.netDp)}</b>
+                          <b className="ph-currency">{fmtPhp(c.netDp)}</b>
                         </div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>DP Monthly ({monthsToPay} mos)</span>
-                          <b>{fmtPhp(c.dpMonthly)}</b>
+                          <b className="ph-currency">{fmtPhp(c.dpMonthly)}</b>
                         </div>
                       </div>
 
@@ -760,19 +840,19 @@ export default function ComparePage() {
                         <div className="px-3 py-2 bg-slate-50 font-medium">Bank</div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>Closing Fee {closingFeePct}%</span>
-                          <b>{fmtPhp(c.closingFee)}</b>
+                          <b className="ph-currency">{fmtPhp(c.closingFee)}</b>
                         </div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>Balance</span>
-                          <b>{fmtPhp(c.bankBalance)}</b>
+                          <b className="ph-currency">{fmtPhp(c.bankBalance)}</b>
                         </div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>15 yrs @ {rate15yr}%</span>
-                          <b>{fmtPhp(c.monthly15)}</b>
+                          <b className="ph-currency">{fmtPhp(c.monthly15)}</b>
                         </div>
                         <div className="px-3 py-2 flex items-center justify-between">
                           <span>20 yrs @ {rate20yr}%</span>
-                          <b>{fmtPhp(c.monthly20)}</b>
+                          <b className="ph-currency">{fmtPhp(c.monthly20)}</b>
                         </div>
                       </div>
                     </div>
