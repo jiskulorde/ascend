@@ -7,6 +7,15 @@ import Select from "react-select";
 import { useRouter } from "next/navigation";
 import { makeUnitId, matchesLegacyOrCanonical } from "@/lib/unit-id";
 import { RESERVATION_FEE_DEFAULT, DOWNPAYMENT_PERCENT_DEFAULT } from "@/lib/quoteDefaults";
+import {
+  computeQuote,
+  rtoTypeCandidates,
+  DEFAULT_DISCOUNT_PCT,
+  DEFAULT_MONTHS_TO_PAY,
+  DEFAULT_CLOSING_FEE_PCT,
+  DEFAULT_RATE_15YR,
+  DEFAULT_RATE_20YR,
+} from "@/lib/financing";
 
 // Bump this whenever the meaning of a stored "compare_adjustments" field changes.
 const COMPARE_ADJUSTMENTS_VERSION = 2;
@@ -14,14 +23,6 @@ const COMPARE_ADJUSTMENTS_VERSION = 2;
 // match them can be remapped to the new approved defaults (see the migration effect below).
 const FORMER_DOWNPAYMENT_PERCENT_DEFAULT = 20;
 const FORMER_RESERVATION_FEE_DEFAULT = 20000;
-
-// Local (non-shared) adjustment defaults, kept in one place so the initial useState calls
-// and the localStorage-migration fallback below can't drift apart.
-const DEFAULT_DISCOUNT_PCT = 0;
-const DEFAULT_MONTHS_TO_PAY = 36;
-const DEFAULT_CLOSING_FEE_PCT = 10.5;
-const DEFAULT_RATE_15YR = 6;
-const DEFAULT_RATE_20YR = 6;
 
 // Shape aligned with your enriched /api/availability output (used in computation)
 type UnitRow = {
@@ -48,32 +49,16 @@ type UnitRow = {
   unit_id?: string; // canonical id (if your API already includes it)
 };
 
-// RTO shape + eligibility-candidate rule, mirrored verbatim from
-// computation/[unitID]/page.tsx (that page doesn't export either, so this is a copy, not
-// an import — the actual eligibility decision still comes only from /api/rto-rate below;
-// this just decides which unit_type string(s) to query with, same as computation does).
-// Keep this in sync with computation/[unitID]/page.tsx if that rule ever changes there.
+// RTO shape + eligibility-candidate rule. rtoTypeCandidates() now comes from
+// @/lib/financing (shared with computation/[unitID]/page.tsx and the shortlist
+// detail page) — the actual eligibility decision still comes only from
+// /api/rto-rate below; that function just decides which unit_type string(s) to
+// query with.
 type RtoInfo = {
   eligible: boolean;
   monthly?: number;
   memo?: string | null;
 };
-
-function rtoTypeCandidates(rawType: string): string[] {
-  const t = (rawType || "").toUpperCase().replace(/\s+/g, "");
-  const out: string[] = [];
-  if (t.includes("STUDIO")) out.push("STUDIO");
-  if (t.includes("1BR") || t.includes("1BED")) out.push("1BR");
-  if (t.includes("2BR") || t.includes("2BED")) out.push("2BR");
-  if (t.includes("3BR") || t.includes("3BED")) {
-    if (t.includes("LOFT") && t.includes("INNER")) out.push("3BR LOFT INNER");
-    if (t.includes("LOFT") && t.includes("END")) out.push("3BR LOFT END");
-    out.push("3BR");
-  }
-  if (t.includes("4BR") || t.includes("4BED")) out.push("4BR");
-  if (out.length === 0) out.push(rawType.toUpperCase());
-  return out;
-}
 
 // `searchText` is a hidden haystack (not shown in the UI) so filtering can match
 // project name/code, tower, unit, and type even though the visible label doesn't
@@ -321,24 +306,17 @@ export default function ComparePage() {
   // Wrapped in useCallback (with its actual inputs as deps) so computedUnits below
   // can depend on `compute` itself and satisfy exhaustive-deps without a manual list.
   const compute = useCallback(
-    (u: UnitRow) => {
-      const TCP = (u.ListPrice || 0) * (1 - discountPct / 100);
-      const dpAmount = (TCP * downPct) / 100;
-      const netDp = Math.max(0, dpAmount - reservationFee);
-      const dpMonthly = monthsToPay > 0 ? netDp / monthsToPay : 0;
-      const closingFee = (TCP * closingFeePct) / 100;
-      const bankBalance = Math.max(0, TCP - dpAmount);
-
-      const amort = (principal: number, annual: number, years: number) => {
-        const r = annual / 100 / 12;
-        const n = years * 12;
-        return r === 0 ? principal / n : principal * (r / (1 - Math.pow(1 + r, -n)));
-      };
-      const monthly15 = amort(bankBalance, rate15yr, 15);
-      const monthly20 = amort(bankBalance, rate20yr, 20);
-
-      return { TCP, dpAmount, netDp, dpMonthly, closingFee, bankBalance, monthly15, monthly20 };
-    },
+    (u: UnitRow) =>
+      computeQuote({
+        listPrice: u.ListPrice || 0,
+        discountPct,
+        downPct,
+        reservationFee,
+        monthsToPay,
+        closingFeePct,
+        rate15yr,
+        rate20yr,
+      }),
     [discountPct, downPct, monthsToPay, reservationFee, closingFeePct, rate15yr, rate20yr]
   );
 
@@ -357,8 +335,9 @@ export default function ComparePage() {
 
   // ---------------- RTO eligibility (per selected unit)
   // Uses the same /api/rto-rate endpoint and area/type-matching rule as
-  // computation/[unitID]/page.tsx (rtoTypeCandidates above). Results are cached by
-  // canonical unit id in rtoByUnit, so this only ever requests units that are (a)
+  // computation/[unitID]/page.tsx (shared rtoTypeCandidates() from @/lib/financing,
+  // imported above). Results are cached by canonical unit id in rtoByUnit, so this
+  // only ever requests units that are (a)
   // currently selected — capped at 6 by compareIds/addId — and (b) not already checked;
   // re-renders from unrelated state (Adjust assumptions, etc.) never re-trigger a fetch
   // because comparedUnits itself doesn't change when those fire.

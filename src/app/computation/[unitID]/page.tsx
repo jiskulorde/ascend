@@ -5,6 +5,15 @@ import { useParams, useRouter } from "next/navigation";
 import Select from "react-select";
 import { matchesLegacyOrCanonical } from "@/lib/unit-id";
 import { RESERVATION_FEE_DEFAULT, DOWNPAYMENT_PERCENT_DEFAULT } from "@/lib/quoteDefaults";
+import {
+  computeQuote,
+  rtoTypeCandidates,
+  DEFAULT_DISCOUNT_PCT,
+  DEFAULT_MONTHS_TO_PAY,
+  DEFAULT_CLOSING_FEE_PCT,
+  DEFAULT_RATE_15YR,
+  DEFAULT_RATE_20YR,
+} from "@/lib/financing";
 
 type UnitRow = {
   property_code: string;
@@ -31,28 +40,16 @@ type UnitRow = {
 type Option = { value: string; label: string };
 
 // ---------- RTO helpers ----------
+// rtoTypeCandidates() comes from @/lib/financing (shared with compare/page.tsx
+// and the shortlist detail page) — the actual eligibility decision still comes
+// only from /api/rto-rate below; that function just decides which unit_type
+// string(s) to query with.
 type RtoInfo = {
   eligible: boolean;
   monthly?: number;                 // monthly HomeAdvance rate (incl dues)
   memo?: string | null;             // memo ref (optional)
   match?: { area_min: number | null; area_max: number | null };
 };
-
-function rtoTypeCandidates(rawType: string): string[] {
-  const t = (rawType || "").toUpperCase().replace(/\s+/g, "");
-  const out: string[] = [];
-  if (t.includes("STUDIO")) out.push("STUDIO");
-  if (t.includes("1BR") || t.includes("1BED")) out.push("1BR");
-  if (t.includes("2BR") || t.includes("2BED")) out.push("2BR");
-  if (t.includes("3BR") || t.includes("3BED")) {
-    if (t.includes("LOFT") && t.includes("INNER")) out.push("3BR LOFT INNER");
-    if (t.includes("LOFT") && t.includes("END")) out.push("3BR LOFT END");
-    out.push("3BR");
-  }
-  if (t.includes("4BR") || t.includes("4BED")) out.push("4BR");
-  if (out.length === 0) out.push(rawType.toUpperCase());
-  return out;
-}
 
 export default function ComputationPage() {
   const router = useRouter();
@@ -66,13 +63,13 @@ export default function ComputationPage() {
   const [loading, setLoading] = useState<boolean>(false);
 
   // Inputs
-  const [discountPct, setDiscountPct] = useState<number>(0);
+  const [discountPct, setDiscountPct] = useState<number>(DEFAULT_DISCOUNT_PCT);
   const [downPct, setDownPct] = useState<number>(DOWNPAYMENT_PERCENT_DEFAULT);
-  const [monthsToPay, setMonthsToPay] = useState<number>(36);
+  const [monthsToPay, setMonthsToPay] = useState<number>(DEFAULT_MONTHS_TO_PAY);
   const [reservationFee, setReservationFee] = useState<number>(RESERVATION_FEE_DEFAULT);
-  const [closingFeePct, setClosingFeePct] = useState<number>(10.5);
-  const [rate15yr, setRate15yr] = useState<number>(6);
-  const [rate20yr, setRate20yr] = useState<number>(6);
+  const [closingFeePct, setClosingFeePct] = useState<number>(DEFAULT_CLOSING_FEE_PCT);
+  const [rate15yr, setRate15yr] = useState<number>(DEFAULT_RATE_15YR);
+  const [rate20yr, setRate20yr] = useState<number>(DEFAULT_RATE_20YR);
 
   // UI
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
@@ -202,22 +199,17 @@ export default function ComputationPage() {
     new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 2 }).format(n);
 
   const listPrice = selectedUnit?.ListPrice ?? 0;
-  const TCP = listPrice * (1 - discountPct / 100);
+  const { TCP, dpAmount, netDp, dpMonthly, closingFee, bankBalance, monthly15, monthly20 } = computeQuote({
+    listPrice,
+    discountPct,
+    downPct,
+    reservationFee,
+    monthsToPay,
+    closingFeePct,
+    rate15yr,
+    rate20yr,
+  });
   const discountSavings = Math.max(0, listPrice - TCP);
-
-  const dpAmount = (TCP * downPct) / 100;
-  const netDp = Math.max(0, dpAmount - reservationFee);
-  const dpMonthly = monthsToPay > 0 ? netDp / monthsToPay : 0;
-  const closingFee = (TCP * closingFeePct) / 100;
-  const bankBalance = Math.max(0, TCP - dpAmount);
-
-  const amort = (principal: number, annual: number, years: number) => {
-    const r = annual / 100 / 12;
-    const n = years * 12;
-    return r === 0 ? principal / n : principal * (r / (1 - Math.pow(1 + r, -n)));
-  };
-  const monthly15 = amort(bankBalance, rate15yr, 15);
-  const monthly20 = amort(bankBalance, rate20yr, 20);
 
   const validityText = (() => {
     const now = new Date();
