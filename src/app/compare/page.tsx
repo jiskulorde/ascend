@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Select from "react-select";
 import { useRouter } from "next/navigation";
 import { makeUnitId, matchesLegacyOrCanonical } from "@/lib/unit-id";
@@ -48,18 +48,70 @@ type UnitRow = {
   unit_id?: string; // canonical id (if your API already includes it)
 };
 
-type Option = { value: string; label: string };
+// RTO shape + eligibility-candidate rule, mirrored verbatim from
+// computation/[unitID]/page.tsx (that page doesn't export either, so this is a copy, not
+// an import — the actual eligibility decision still comes only from /api/rto-rate below;
+// this just decides which unit_type string(s) to query with, same as computation does).
+// Keep this in sync with computation/[unitID]/page.tsx if that rule ever changes there.
+type RtoInfo = {
+  eligible: boolean;
+  monthly?: number;
+  memo?: string | null;
+};
 
-// FIX 1: give the row renderer a proper type so `u` is not `any`
-type TableRow = [label: string, render: (u: UnitRow) => React.ReactNode];
+function rtoTypeCandidates(rawType: string): string[] {
+  const t = (rawType || "").toUpperCase().replace(/\s+/g, "");
+  const out: string[] = [];
+  if (t.includes("STUDIO")) out.push("STUDIO");
+  if (t.includes("1BR") || t.includes("1BED")) out.push("1BR");
+  if (t.includes("2BR") || t.includes("2BED")) out.push("2BR");
+  if (t.includes("3BR") || t.includes("3BED")) {
+    if (t.includes("LOFT") && t.includes("INNER")) out.push("3BR LOFT INNER");
+    if (t.includes("LOFT") && t.includes("END")) out.push("3BR LOFT END");
+    out.push("3BR");
+  }
+  if (t.includes("4BR") || t.includes("4BED")) out.push("4BR");
+  if (out.length === 0) out.push(rawType.toUpperCase());
+  return out;
+}
+
+// `searchText` is a hidden haystack (not shown in the UI) so filtering can match
+// project name/code, tower, unit, and type even though the visible label doesn't
+// display all of those fields.
+type Option = { value: string; label: string; searchText: string };
+
+// Compact label/value cell used inside comparison cards. `best` applies a subtle
+// (single-color) highlight + small badge instead of the old table's flat rows.
+function StatCell({
+  label,
+  value,
+  best,
+  bestLabel = "lowest",
+}: {
+  label: string;
+  value: React.ReactNode;
+  best?: boolean;
+  bestLabel?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className={`text-sm font-semibold truncate ${best ? "text-emerald-700" : ""}`}>{value}</div>
+      {best && (
+        <div className="text-[9px] font-semibold uppercase tracking-wide text-emerald-600">{bestLabel}</div>
+      )}
+    </div>
+  );
+}
 
 // Keep cache small & robust
 const COMPARE_CACHE_KEY = "compare_rows_cache_v2";
-const MAX_CACHE_UNITS = 800; // tune as you like
 
 function slimForCompare(data: any[]): UnitRow[] {
-  // keep only fields Compare uses and cap to MAX_CACHE_UNITS
-  return data.slice(0, MAX_CACHE_UNITS).map((u) => ({
+  // Keep only the fields Compare uses. Intentionally NOT capped to a unit count —
+  // the Add Units selector must search the full inventory (see the selector below),
+  // and the slimmed payload comfortably fits safeSetJSON's localStorage size guard.
+  return data.map((u) => ({
     // meta
     property_code: u.property_code ?? "",
     property_name: u.property_name ?? "",
@@ -132,13 +184,11 @@ export default function ComparePage() {
   const [rate15yr, setRate15yr] = useState<number>(DEFAULT_RATE_15YR);
   const [rate20yr, setRate20yr] = useState<number>(DEFAULT_RATE_20YR);
 
-  // mobile adjustments panel
+  // adjustments panel (shared trigger across breakpoints)
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
-  const [floatingDocked, setFloatingDocked] = useState(true);
 
   // export refs
   const sheetRef = useRef<HTMLDivElement | null>(null);
-  const tableRef = useRef<HTMLTableElement | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -267,25 +317,30 @@ export default function ComparePage() {
   const fmtPhp = (n: number) =>
     new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 2 }).format(n);
 
-  // Given a unit, compute comparable fields with global adjustments
-  const compute = (u: UnitRow) => {
-    const TCP = (u.ListPrice || 0) * (1 - discountPct / 100);
-    const dpAmount = (TCP * downPct) / 100;
-    const netDp = Math.max(0, dpAmount - reservationFee);
-    const dpMonthly = monthsToPay > 0 ? netDp / monthsToPay : 0;
-    const closingFee = (TCP * closingFeePct) / 100;
-    const bankBalance = Math.max(0, TCP - dpAmount);
+  // Given a unit, compute comparable fields with global adjustments.
+  // Wrapped in useCallback (with its actual inputs as deps) so computedUnits below
+  // can depend on `compute` itself and satisfy exhaustive-deps without a manual list.
+  const compute = useCallback(
+    (u: UnitRow) => {
+      const TCP = (u.ListPrice || 0) * (1 - discountPct / 100);
+      const dpAmount = (TCP * downPct) / 100;
+      const netDp = Math.max(0, dpAmount - reservationFee);
+      const dpMonthly = monthsToPay > 0 ? netDp / monthsToPay : 0;
+      const closingFee = (TCP * closingFeePct) / 100;
+      const bankBalance = Math.max(0, TCP - dpAmount);
 
-    const amort = (principal: number, annual: number, years: number) => {
-      const r = annual / 100 / 12;
-      const n = years * 12;
-      return r === 0 ? principal / n : principal * (r / (1 - Math.pow(1 + r, -n)));
-    };
-    const monthly15 = amort(bankBalance, rate15yr, 15);
-    const monthly20 = amort(bankBalance, rate20yr, 20);
+      const amort = (principal: number, annual: number, years: number) => {
+        const r = annual / 100 / 12;
+        const n = years * 12;
+        return r === 0 ? principal / n : principal * (r / (1 - Math.pow(1 + r, -n)));
+      };
+      const monthly15 = amort(bankBalance, rate15yr, 15);
+      const monthly20 = amort(bankBalance, rate20yr, 20);
 
-    return { TCP, dpAmount, netDp, dpMonthly, closingFee, bankBalance, monthly15, monthly20 };
-  };
+      return { TCP, dpAmount, netDp, dpMonthly, closingFee, bankBalance, monthly15, monthly20 };
+    },
+    [discountPct, downPct, monthsToPay, reservationFee, closingFeePct, rate15yr, rate20yr]
+  );
 
   // ---------------- Dataset: only those in compareIds
   const comparedUnits = useMemo(() => {
@@ -299,6 +354,76 @@ export default function ComparePage() {
       )
     );
   }, [rows, compareIds]);
+
+  // ---------------- RTO eligibility (per selected unit)
+  // Uses the same /api/rto-rate endpoint and area/type-matching rule as
+  // computation/[unitID]/page.tsx (rtoTypeCandidates above). Results are cached by
+  // canonical unit id in rtoByUnit, so this only ever requests units that are (a)
+  // currently selected — capped at 6 by compareIds/addId — and (b) not already checked;
+  // re-renders from unrelated state (Adjust assumptions, etc.) never re-trigger a fetch
+  // because comparedUnits itself doesn't change when those fire.
+  const [rtoByUnit, setRtoByUnit] = useState<Record<string, RtoInfo>>({});
+  const [rtoLoadingIds, setRtoLoadingIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const pending = comparedUnits
+      .map((u) => ({ u, cid: canonicalIdFor(u) }))
+      .filter(({ cid }) => !(cid in rtoByUnit));
+    if (!pending.length) return;
+
+    let cancelled = false;
+    setRtoLoadingIds((prev) => {
+      const next = new Set(prev);
+      pending.forEach(({ cid }) => next.add(cid));
+      return next;
+    });
+
+    (async () => {
+      try {
+        const results = await Promise.all(
+          pending.map(async ({ u, cid }) => {
+            const candidates = rtoTypeCandidates(u.Type);
+            for (const unit_type of candidates) {
+              const qs = new URLSearchParams({
+                project_code: u.property_code,
+                unit_type,
+                area: String(u.GrossAreaSQM || 0),
+              });
+              try {
+                const res = await fetch(`/api/rto-rate?${qs.toString()}`, { cache: "no-store" });
+                if (!res.ok) continue;
+                const json = await res.json();
+                if (json?.eligible) {
+                  return [
+                    cid,
+                    { eligible: true, monthly: Number(json.monthly_rate) || 0, memo: json.memo_ref || null },
+                  ] as const;
+                }
+              } catch {
+                // try next candidate
+              }
+            }
+            return [cid, { eligible: false }] as const;
+          })
+        );
+
+        if (cancelled) return;
+        setRtoByUnit((prev) => {
+          const next = { ...prev };
+          results.forEach(([cid, info]) => { next[cid] = info; });
+          return next;
+        });
+      } finally {
+        setRtoLoadingIds((prev) => {
+          const next = new Set(prev);
+          pending.forEach(({ cid }) => next.delete(cid));
+          return next;
+        });
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [comparedUnits, rtoByUnit]);
 
   // ---------------- Add/remove compare items
   const addId = (id: string) => {
@@ -318,74 +443,136 @@ export default function ComparePage() {
   };
 
   // ---------------- Add-unit select options
-  const allOptions: Option[] = useMemo(
-    () =>
-      rows.map(u => ({
-        value: canonicalIdFor(u),
-        label: `${u.property_name} • ${u.tower_name || u.tower_code} • ${u.BuildingUnit} • ₱${u.ListPrice.toLocaleString()}`
-      })),
-    [rows]
+  // Built from the FULL loaded inventory (`rows`, from /api/availability — no slicing),
+  // excluding only units already in the comparison. Search matches project name/code,
+  // tower, building unit, and type via the custom filterOption below.
+  const selectedCanonicalIds = useMemo(
+    () => new Set(comparedUnits.map(canonicalIdFor)),
+    [comparedUnits]
   );
 
-  // FIX 2: define TABLE_ROWS at the component level (not inside a function)
-  const TABLE_ROWS: TableRow[] = [
-    ["Project",          (u) => u.property_name],
-    ["City",             (u) => u.city],
-    ["Address",          (u) => u.address],
-    ["Tower",            (u) => u.tower_name || u.tower_code],
-    ["Unit",             (u) => u.BuildingUnit],
-    ["Type",             (u) => u.Type],
-    ["Floor",            (u) => u.Floor],
-    ["Area (SQM)",       (u) => u.GrossAreaSQM],
-    ["Facing",           (u) => u.Facing],
-    ["Status",           (u) => u.Status],
-    ["RFO Date",         (u) => u.RFODate],
-    ["List Price",       (u) => <span className="ph-currency">{fmtPhp(u.ListPrice)}</span>],
-    ["Price / SQM",      (u) => <span className="ph-currency">{fmtPhp(u.PerSQM)}</span>],
-    ["—",                ()  => "—"],
-    ["Discount %",       ()  => `${discountPct}%`],
-    ["Total Contract Price", (u) => <span className="ph-currency">{fmtPhp(compute(u).TCP)}</span>],
-    ["Downpayment %",    ()  => `${downPct}%`],
-    ["Downpayment",      (u) => <span className="ph-currency">{fmtPhp(compute(u).dpAmount)}</span>],
-    ["Reservation Fee",  ()  => <span className="ph-currency">{fmtPhp(reservationFee)}</span>],
-    ["Net DP",           (u) => <span className="ph-currency">{fmtPhp(compute(u).netDp)}</span>],
-    ["Months to Pay",    ()  => monthsToPay],
-    ["DP Monthly",       (u) => <span className="ph-currency">{fmtPhp(compute(u).dpMonthly)}</span>],
-    ["Closing Fee %",    ()  => `${closingFeePct}%`],
-    ["Closing Fee",      (u) => <span className="ph-currency">{fmtPhp(compute(u).closingFee)}</span>],
-    ["Bank Balance",     (u) => <span className="ph-currency">{fmtPhp(compute(u).bankBalance)}</span>],
-    [`15yrs @ ${rate15yr}%`, (u) => <span className="ph-currency">{fmtPhp(compute(u).monthly15)}</span>],
-    [`20yrs @ ${rate20yr}%`, (u) => <span className="ph-currency">{fmtPhp(compute(u).monthly20)}</span>],
-  ];
+  const allOptions: Option[] = useMemo(
+    () =>
+      rows
+        .filter((u) => !selectedCanonicalIds.has(canonicalIdFor(u)))
+        .map((u) => ({
+          value: canonicalIdFor(u),
+          label: `${u.property_name} • ${u.tower_name || u.tower_code} • ${u.BuildingUnit} • ₱${u.ListPrice.toLocaleString()}`,
+          searchText: [u.property_name, u.property_code, u.tower_name, u.tower_code, u.BuildingUnit, u.Type]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase(),
+        })),
+    [rows, selectedCanonicalIds]
+  );
+
+  const filterUnitOption = (option: { data: Option }, rawInput: string) => {
+    const q = rawInput.trim().toLowerCase();
+    if (!q) return true;
+    return option.data.searchText.includes(q);
+  };
+
+  // Computed units paired with their canonical id + derived figures, shared by the
+  // desktop and mobile comparison cards so both stay in sync from one source.
+  const computedUnits = useMemo(
+    () => comparedUnits.map((u) => ({ u, c: compute(u), cid: canonicalIdFor(u) })),
+    [comparedUnits, compute]
+  );
+
+  // Subtle "best value" indicators — only meaningful when comparing 2+ units.
+  const winners = useMemo(() => {
+    if (computedUnits.length < 2) return null;
+    const minBy = (sel: (x: (typeof computedUnits)[number]) => number) =>
+      computedUnits.reduce((best, cur) => (sel(cur) < sel(best) ? cur : best), computedUnits[0]).cid;
+    const maxBy = (sel: (x: (typeof computedUnits)[number]) => number) =>
+      computedUnits.reduce((best, cur) => (sel(cur) > sel(best) ? cur : best), computedUnits[0]).cid;
+    return {
+      listPrice: minBy((x) => x.u.ListPrice),
+      tcp: minBy((x) => x.c.TCP),
+      area: maxBy((x) => x.u.GrossAreaSQM),
+      dpMonthly: minBy((x) => x.c.dpMonthly),
+      monthly15: minBy((x) => x.c.monthly15),
+      monthly20: minBy((x) => x.c.monthly20),
+    };
+  }, [computedUnits]);
 
   // ---------------- Exports
-  // The live table stretches to fill whatever viewport it's on (min-w-full inside a
-  // wide desktop container), so capturing it as-is can produce an excessively wide,
-  // sparse export. Freeze it to its own content width during capture instead.
-  const COMPARE_EXPORT_MAX_WIDTH = 1400;
-  const withSheetFrozen = async <T,>(work: () => Promise<T>): Promise<T> => {
+  // The live comparison area stretches to fill whatever viewport it's on, and the desktop
+  // card row scrolls horizontally past 3-4 units — capturing it as-is either crops cards
+  // (a fixed width cap) or under-measures width entirely (an `overflow:visible` element's
+  // scrollWidth does NOT include a descendant's overflowed content — only an element that
+  // is itself the scrolling container reports that). So width is computed in two passes:
+  // first the horizontally-scrolling row (marked data-export-relax-overflow) is measured
+  // at its own true natural width via a transient `width:max-content` (immediately reverted
+  // — its children are fixed-width cards, not percentage-based, so this can't cascade into
+  // unwrapping text inside them); that natural width (or the node's current width if no
+  // such row is present/visible, e.g. the mobile stacked layout) becomes the content width
+  // the whole wrapper is pinned to, so every selected unit (up to 6) fits with no cropping
+  // and no horizontal scrollbar.
+  //
+  // It also swaps the captured DOM from "interactive UI" to "clean document": elements
+  // marked data-export-hide (remove/Compute buttons) are hidden, the element marked
+  // data-export-only (the "Unit Comparison" heading + assumptions summary, normally
+  // display:none) is shown, and export-only padding is applied on all sides.
+  const EXPORT_PADDING_PX = 22; // ~20–24px on every side, per spec
+  const withSheetFrozen = async <T,>(
+    work: (dims: { width: number; height: number }) => Promise<T>
+  ): Promise<T | undefined> => {
     const node = sheetRef.current;
-    if (!node) return work();
-    const table = tableRef.current;
+    if (!node) return undefined;
+
+    const hideEls = Array.from(node.querySelectorAll<HTMLElement>('[data-export-hide="true"]'));
+    const showEls = Array.from(node.querySelectorAll<HTMLElement>('[data-export-only="true"]'));
+    const relaxEls = Array.from(node.querySelectorAll<HTMLElement>('[data-export-relax-overflow="true"]'));
+    const prevHideDisplay = hideEls.map((el) => el.style.display);
+    const prevShowDisplay = showEls.map((el) => el.style.display);
+    const prevRelax = relaxEls.map((el) => ({
+      overflow: el.style.overflow,
+      maxWidth: el.style.maxWidth,
+      minWidth: el.style.minWidth,
+    }));
+
+    hideEls.forEach((el) => { el.style.display = "none"; });
+    showEls.forEach((el) => { el.style.display = "block"; });
+    relaxEls.forEach((el) => {
+      el.style.overflow = "visible";
+      el.style.maxWidth = "none";
+      el.style.minWidth = "0";
+    });
+
     const prevNode = {
       width: node.style.width,
       maxWidth: node.style.maxWidth,
+      minWidth: node.style.minWidth,
+      padding: node.style.padding,
       boxShadow: node.style.boxShadow,
       overflow: node.style.overflow,
     };
-    const prevTable = table ? { width: table.style.width, minWidth: table.style.minWidth } : null;
 
-    if (table) {
-      table.style.minWidth = "0";
-      table.style.width = "max-content";
-    }
     node.style.overflow = "visible";
-    document.body.classList.add("exporting");
-    await new Promise((r) => requestAnimationFrame(() => r(null as any)));
-
-    const naturalWidth = Math.min(node.scrollWidth, COMPARE_EXPORT_MAX_WIDTH);
-    node.style.width = `${naturalWidth}px`;
     node.style.maxWidth = "none";
+    node.style.minWidth = "0";
+    document.body.classList.add("exporting");
+
+    // Pass 1: measure the true natural width. Only the relax-marked row (fixed-width
+    // cards) is briefly unconstrained to measure it — never `node` itself, since its
+    // mobile-layout children use percentage widths that would runaway-unwrap under an
+    // indefinite-width ancestor. getBoundingClientRect() forces a synchronous layout,
+    // so no animation-frame wait is needed for this read/revert pair.
+    let contentWidth = node.getBoundingClientRect().width;
+    relaxEls.forEach((el) => {
+      const prevWidth = el.style.width;
+      el.style.width = "max-content";
+      contentWidth = Math.max(contentWidth, el.getBoundingClientRect().width);
+      el.style.width = prevWidth;
+    });
+
+    const finalWidth = Math.ceil(contentWidth) + EXPORT_PADDING_PX * 2;
+
+    // Pass 2: pin the wrapper to that width and add the export-only padding, then let
+    // layout settle before measuring the (now-final) height.
+    node.style.width = `${finalWidth}px`;
+    node.style.padding = `${EXPORT_PADDING_PX}px`;
     node.style.boxShadow = "none";
     await new Promise((r) => requestAnimationFrame(() => r(null as any)));
 
@@ -395,17 +582,24 @@ export default function ComparePage() {
       new Promise((r) => setTimeout(r, 1500)),
     ]);
 
+    const finalHeight = Math.ceil(node.getBoundingClientRect().height);
+
     try {
-      return await work();
+      return await work({ width: finalWidth, height: finalHeight });
     } finally {
       node.style.width = prevNode.width;
       node.style.maxWidth = prevNode.maxWidth;
+      node.style.minWidth = prevNode.minWidth;
+      node.style.padding = prevNode.padding;
       node.style.boxShadow = prevNode.boxShadow;
       node.style.overflow = prevNode.overflow;
-      if (table && prevTable) {
-        table.style.width = prevTable.width;
-        table.style.minWidth = prevTable.minWidth;
-      }
+      hideEls.forEach((el, i) => { el.style.display = prevHideDisplay[i]; });
+      showEls.forEach((el, i) => { el.style.display = prevShowDisplay[i]; });
+      relaxEls.forEach((el, i) => {
+        el.style.overflow = prevRelax[i].overflow;
+        el.style.maxWidth = prevRelax[i].maxWidth;
+        el.style.minWidth = prevRelax[i].minWidth;
+      });
       document.body.classList.remove("exporting");
     }
   };
@@ -413,10 +607,8 @@ export default function ComparePage() {
   const downloadPNG = async () => {
     if (!sheetRef.current) return;
     const { toPng } = await import("html-to-image");
-    await withSheetFrozen(async () => {
+    await withSheetFrozen(async ({ width, height }) => {
       const node = sheetRef.current!;
-      const width = Math.max(node.scrollWidth, 1);
-      const height = Math.max(node.scrollHeight, node.offsetHeight);
       const url = await toPng(node, {
         cacheBust: true,
         backgroundColor: "#ffffff",
@@ -436,10 +628,8 @@ export default function ComparePage() {
     if (!sheetRef.current) return;
     const { toPng } = await import("html-to-image");
     const { jsPDF } = await import("jspdf");
-    await withSheetFrozen(async () => {
+    await withSheetFrozen(async ({ width: imgW, height: imgH }) => {
       const node = sheetRef.current!;
-      const imgW = Math.max(node.scrollWidth, 1);
-      const imgH = Math.max(node.scrollHeight, node.offsetHeight);
       const imgData = await toPng(node, {
         cacheBust: true,
         backgroundColor: "#ffffff",
@@ -502,6 +692,22 @@ export default function ComparePage() {
       ["Bank Balance", (u) => compute(u).bankBalance],
       [`15yrs @ ${rate15yr}%`, (u) => compute(u).monthly15],
       [`20yrs @ ${rate20yr}%`, (u) => compute(u).monthly20],
+      [
+        "RTO Eligible",
+        (u) => {
+          const r = rtoByUnit[canonicalIdFor(u)];
+          return r ? (r.eligible ? "Yes" : "No") : "Pending";
+        },
+      ],
+      ["RTO Monthly Rate", (u) => rtoByUnit[canonicalIdFor(u)]?.eligible ? rtoByUnit[canonicalIdFor(u)]!.monthly || 0 : ""],
+      [
+        "RTO Total Monthly (DP + RTO)",
+        (u) => {
+          const r = rtoByUnit[canonicalIdFor(u)];
+          return r?.eligible ? compute(u).dpMonthly + (r.monthly || 0) : "";
+        },
+      ],
+      ["RTO Memo", (u) => rtoByUnit[canonicalIdFor(u)]?.memo || ""],
     ];
 
     // FIX 5: make the 2D array able to hold strings OR numbers
@@ -516,11 +722,153 @@ export default function ComparePage() {
     XLSX.writeFile(wb, "unit-comparison.xlsx");
   };
 
+  // Renders one unit as a compact comparison card. Shared by the desktop
+  // side-by-side row and the mobile stacked list so both stay identical.
+  const renderUnitCard = ({ u, c, cid }: (typeof computedUnits)[number]) => {
+    const isBest = (key: keyof NonNullable<typeof winners>) => !!winners && winners[key] === cid;
+    const rtoInfo = rtoByUnit[cid];
+    const rtoLoading = rtoLoadingIds.has(cid);
+    const rtoTotalMonthly = rtoInfo?.eligible ? c.dpMonthly + (rtoInfo.monthly || 0) : null;
+    return (
+      <div key={cid} className="card overflow-hidden flex flex-col w-full md:w-[300px] md:shrink-0">
+        <div className="bg-[#0f172a] text-white px-4 py-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="font-semibold truncate">{u.property_name}</div>
+            <div className="text-xs opacity-90 truncate">
+              {u.tower_name || u.tower_code} • {u.BuildingUnit}
+            </div>
+          </div>
+          <button
+            onClick={() => removeId(cid)}
+            data-export-hide="true"
+            className="shrink-0 rounded border border-white/30 px-2 py-1 text-xs hover:bg-white/10"
+            title="Remove from comparison"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="p-4 text-sm flex-1 flex flex-col gap-3">
+          {/* Primary values */}
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+            <StatCell
+              label="List Price"
+              value={<span className="ph-currency">{fmtPhp(u.ListPrice)}</span>}
+              best={isBest("listPrice")}
+            />
+            <StatCell
+              label="Total Contract Price"
+              value={<span className="ph-currency">{fmtPhp(c.TCP)}</span>}
+              best={isBest("tcp")}
+            />
+            <StatCell label="Area" value={`${u.GrossAreaSQM} sqm`} best={isBest("area")} bestLabel="largest" />
+            <StatCell label="Downpayment" value={<span className="ph-currency">{fmtPhp(c.dpAmount)}</span>} />
+          </div>
+
+          {/* Monthly payment — the number a customer actually pays each month, kept prominent */}
+          <div
+            className={`rounded-lg px-3 py-2 border ${
+              isBest("dpMonthly") ? "bg-emerald-50 border-emerald-200" : "bg-blue-50 border-blue-100"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">Monthly DP ({monthsToPay} mos)</span>
+              {isBest("dpMonthly") && (
+                <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-600">lowest</span>
+              )}
+            </div>
+            <div
+              className={`ph-currency text-[22px] font-extrabold ${
+                isBest("dpMonthly") ? "text-emerald-800" : "text-blue-900"
+              }`}
+            >
+              {fmtPhp(c.dpMonthly)}
+            </div>
+          </div>
+
+          {/* RTO — eligibility/rate come only from /api/rto-rate; never invented client-side */}
+          {rtoLoading ? (
+            <div className="text-[11px] text-muted-foreground italic">Checking RTO eligibility…</div>
+          ) : rtoInfo?.eligible ? (
+            <div className="rounded-lg px-3 py-2 border bg-emerald-50 border-emerald-200">
+              <div className="text-[9px] font-bold uppercase tracking-wide text-emerald-700">RTO Eligible</div>
+              <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>RTO monthly rate</span>
+                <b className="ph-currency text-foreground">{fmtPhp(rtoInfo.monthly || 0)}</b>
+              </div>
+              <div className="mt-1.5 pt-1.5 border-t border-emerald-200">
+                <div className="text-xs text-muted-foreground">Total Monthly (DP + RTO)</div>
+                <div className="ph-currency text-[22px] font-extrabold text-emerald-800">
+                  {fmtPhp(rtoTotalMonthly!)}
+                </div>
+              </div>
+              {rtoInfo.memo && (
+                <div className="mt-1 text-[10px] text-muted-foreground truncate" title={rtoInfo.memo}>
+                  Memo: {rtoInfo.memo}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-[11px] text-muted-foreground italic">Not available for RTO</div>
+          )}
+
+          {/* Bank financing */}
+          <div className="rounded-lg border">
+            <div className="px-3 py-1.5 bg-slate-50 text-xs font-medium flex items-center justify-between gap-2">
+              <span>Bank Balance</span>
+              <b className="ph-currency">{fmtPhp(c.bankBalance)}</b>
+            </div>
+            <div className="grid grid-cols-2 divide-x">
+              <div className="px-3 py-2 min-w-0">
+                <StatCell
+                  label={`15 yrs @ ${rate15yr}%`}
+                  value={<span className="ph-currency">{fmtPhp(c.monthly15)}</span>}
+                  best={isBest("monthly15")}
+                />
+              </div>
+              <div className="px-3 py-2 min-w-0">
+                <StatCell
+                  label={`20 yrs @ ${rate20yr}%`}
+                  value={<span className="ph-currency">{fmtPhp(c.monthly20)}</span>}
+                  best={isBest("monthly20")}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Secondary: descriptive details, condensed to a couple of lines */}
+          <div className="mt-auto pt-2 border-t text-xs text-muted-foreground space-y-1">
+            <div className="truncate" title={`${u.city} • ${u.address}`}>
+              {u.city}
+              {u.address ? ` • ${u.address}` : ""}
+            </div>
+            <div className="truncate">
+              {u.Type || "—"} • Floor {u.Floor || "—"} • {u.Facing || "Facing n/a"}
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate">
+                {u.Status || "—"}
+                {u.RFODate ? ` • RFO ${u.RFODate}` : ""}
+              </span>
+              <button
+                onClick={() => router.push(`/computation/${encodeURIComponent(cid)}`)}
+                data-export-hide="true"
+                className="shrink-0 rounded border px-2 py-0.5 text-[11px] hover:bg-muted"
+              >
+                Compute →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // ---------------- UI
   return (
     <main className="min-h-screen bg-[#f6f7fb]">
       <div className="mx-auto max-w-7xl px-4 md:px-6 py-6">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold">Compare Units</h1>
             <p className="text-sm text-muted-foreground">
@@ -528,28 +876,46 @@ export default function ComparePage() {
             </p>
           </div>
 
-          {/* Export */}
-          <div className="hidden md:flex items-center gap-2">
-            <button onClick={downloadPNG} className="btn btn-outline">PNG</button>
-            <button onClick={downloadPDF} className="btn btn-outline">PDF</button>
-            <button onClick={downloadExcel} className="btn btn-primary">Excel</button>
+          {/* Export — single toolbar (all breakpoints); PNG/PDF/Excel share the same styling */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={downloadPNG}
+              disabled={!comparedUnits.length}
+              className="btn btn-outline disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              PNG
+            </button>
+            <button
+              onClick={downloadPDF}
+              disabled={!comparedUnits.length}
+              className="btn btn-outline disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              PDF
+            </button>
+            <button
+              onClick={downloadExcel}
+              disabled={!comparedUnits.length}
+              className="btn btn-outline disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Excel
+            </button>
           </div>
         </div>
 
-        {/* Top bar: add unit + adjustments (desktop inline) */}
-        <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-4">
-          {/* Add unit */}
-          <div className="card p-4">
+        {/* Top bar: add unit + compact Adjust trigger */}
+        <div className="mt-4 flex flex-col sm:flex-row gap-3 sm:items-start">
+          <div className="card p-4 flex-1">
             <div className="text-sm font-medium mb-2">Add units to compare</div>
             {mounted && (
               <Select
                 instanceId="compare-add-select"
                 options={allOptions}
+                filterOption={filterUnitOption}
                 onChange={(opt) => {
                   const id = (opt as Option)?.value;
                   if (id) addId(id);
                 }}
-                placeholder="Search by project / tower / unit…"
+                placeholder="Search by project / tower / unit / type…"
               />
             )}
             {!!compareIds.length && (
@@ -559,69 +925,19 @@ export default function ComparePage() {
             )}
           </div>
 
-          {/* Adjustments (desktop) */}
-          <div className="hidden lg:block card p-4">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold">Adjustments</div>
-              <button
-                onClick={() => setFloatingDocked((v) => !v)}
-                className="rounded border px-2 py-1 text-xs hover:bg-gray-50"
-              >
-                {floatingDocked ? "Undock" : "Dock"}
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mt-3 text-sm">
-              <label className="block text-xs">
-                Special Discount %
-                <input type="number" step={0.1} value={discountPct} onChange={(e) => setDiscountPct(Number(e.target.value || 0))} className="mt-1 w-full px-2 py-1 border rounded" />
-              </label>
-              <label className="block text-xs">
-                Downpayment %
-                <input type="number" step={0.1} value={downPct} onChange={(e) => setDownPct(Number(e.target.value || 0))} className="mt-1 w-full px-2 py-1 border rounded" />
-              </label>
-              <label className="block text-xs">
-                Months to Pay
-                <input type="number" step={1} value={monthsToPay} onChange={(e) => setMonthsToPay(Math.max(1, Math.floor(Number(e.target.value || 0))))} className="mt-1 w-full px-2 py-1 border rounded" />
-              </label>
-              <label className="block text-xs">
-                Reservation Fee
-                <input type="number" step={1000} value={reservationFee} onChange={(e) => setReservationFee(Math.max(0, Math.floor(Number(e.target.value || 0))))} className="mt-1 w-full px-2 py-1 border rounded" />
-              </label>
-              <label className="block text-xs">
-                Closing Fee %
-                <input type="number" step={0.1} value={closingFeePct} onChange={(e) => setClosingFeePct(Number(e.target.value || 0))} className="mt-1 w-full px-2 py-1 border rounded" />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block text-xs">
-                  15 yrs %
-                  <input type="number" step={0.1} value={rate15yr} onChange={(e) => setRate15yr(Number(e.target.value || 0))} className="mt-1 w-full px-2 py-1 border rounded" />
-                </label>
-                <label className="block text-xs">
-                  20 yrs %
-                  <input type="number" step={0.1} value={rate20yr} onChange={(e) => setRate20yr(Number(e.target.value || 0))} className="mt-1 w-full px-2 py-1 border rounded" />
-                </label>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Mobile FAB for adjustments */}
-        {mounted && (
           <button
             onClick={() => setIsAdjustOpen(true)}
-            className="lg:hidden fixed bottom-5 right-5 z-50 rounded-full shadow-lg bg-blue-600 text-white px-4 py-3"
-            aria-label="Open adjustments"
+            className="btn btn-outline sm:mt-0 whitespace-nowrap"
           >
-            Adjust
+            ⚙ Adjust assumptions
           </button>
-        )}
+        </div>
 
-        {/* Mobile bottom sheet for adjustments */}
+        {/* Adjust panel — one implementation shared across breakpoints */}
         {isAdjustOpen && (
-          <div className="lg:hidden fixed inset-0 z-[60]">
+          <div className="fixed inset-0 z-[60]">
             <div className="absolute inset-0 bg-black/40" onClick={() => setIsAdjustOpen(false)} />
-            <div className="absolute left-0 right-0 bottom-0 max-h-[85vh] bg-white rounded-t-2xl shadow-2xl">
+            <div className="absolute left-0 right-0 bottom-0 sm:left-1/2 sm:right-auto sm:bottom-auto sm:top-24 sm:-translate-x-1/2 sm:w-[440px] max-h-[85vh] bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl">
               <div className="flex items-center justify-between px-4 py-3 border-b rounded-t-2xl">
                 <div className="font-semibold">Adjustments</div>
                 <button onClick={() => setIsAdjustOpen(false)} className="rounded-lg border px-3 py-1 text-sm hover:bg-gray-50">
@@ -668,228 +984,49 @@ export default function ComparePage() {
         )}
 
         {/* ---------------- Comparison content ---------------- */}
-        <div className="mt-6">
-          {/* Desktop: wide comparison table */}
-          <div className="hidden md:block">
-            <div className="card p-0 overflow-x-auto" ref={sheetRef}>
-              {(!comparedUnits.length && !loading) && (
-                <div className="p-8 text-center text-muted-foreground">
-                  Pick at least two units from Availability and click “Compare”, or add here via search.
-                </div>
-              )}
-
-              {comparedUnits.length > 0 && (
-                <table ref={tableRef} className="min-w-full text-sm">
-                  <thead>
-                    <tr className="bg-[#0f172a] text-white">
-                      <th className="sticky left-0 z-10 bg-[#0f172a] text-left px-3 py-3">Field</th>
-                      {comparedUnits.map((u) => {
-                        const cid = canonicalIdFor(u);
-                        return (
-                          <th key={cid} className="px-3 py-3 text-left whitespace-nowrap">
-                            <div className="flex items-center justify-between gap-2">
-                              <div>
-                                <div className="font-semibold">{u.property_name}</div>
-                                <div className="text-xs opacity-90">
-                                  {u.tower_name || u.tower_code} • {u.BuildingUnit}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => router.push(`/computation/${encodeURIComponent(cid)}`)}
-                                  className="rounded border px-2 py-1 text-xs hover:bg-white/10"
-                                >
-                                  Compute
-                                </button>
-                                <button
-                                  onClick={() => removeId(cid)}
-                                  className="rounded border px-2 py-1 text-xs hover:bg-white/10"
-                                  title="Remove from comparison"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {TABLE_ROWS.map(([label, fn], idx) => (
-                      <tr key={idx} className="even:bg-white odd:bg-slate-50">
-                        <td className="sticky left-0 z-10 bg-inherit px-3 py-2 font-medium">
-                          {label}
-                        </td>
-                        {comparedUnits.map((u) => {
-                          const cid = canonicalIdFor(u);
-                          return (
-                            <td
-                              key={`${label}-${cid}`}
-                              className="px-3 py-2 whitespace-nowrap text-right md:text-left"
-                            >
-                              {fn(u)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* Exports (desktop bottom) */}
-            {comparedUnits.length > 0 && (
-              <div className="mt-3 flex items-center gap-2">
-                <button onClick={downloadPNG} className="btn btn-outline">PNG</button>
-                <button onClick={downloadPDF} className="btn btn-outline">PDF</button>
-                <button onClick={downloadExcel} className="btn btn-primary">Excel</button>
-              </div>
-            )}
-          </div>
-
-          {/* Mobile: stacked cards */}
-          <div className="md:hidden">
-            {loading && <div className="card p-6">Loading…</div>}
-            {loadError && (
-              <div className="card p-4 border border-red-200 bg-red-50 text-sm text-red-800">
-                <div className="font-semibold mb-1">Couldn’t load availability.</div>
-                <div className="opacity-80 break-all">{loadError}</div>
-                <button className="mt-2 rounded border px-3 py-1 text-xs" onClick={fetchRows}>Retry</button>
-              </div>
-            )}
-
-            {!loading && !comparedUnits.length && (
-              <div className="card p-6 text-center text-muted-foreground">
-                Pick at least two units from Availability and tap “Compare”, or add here via search.
-              </div>
-            )}
-
-            <div className="space-y-3">
-              {comparedUnits.map((u) => {
-                const cid = canonicalIdFor(u);
-                const c = compute(u);
-                return (
-                  <div key={cid} className="card overflow-hidden">
-                    <div className="bg-[#0f172a] text-white px-4 py-3 flex items-center justify-between">
-                      <div>
-                        <div className="font-semibold">{u.property_name}</div>
-                        <div className="text-xs opacity-90">{u.tower_name || u.tower_code} • {u.BuildingUnit}</div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => router.push(`/computation/${encodeURIComponent(cid)}`)}
-                          className="rounded border px-2 py-1 text-xs hover:bg-white/10"
-                        >
-                          Compute
-                        </button>
-                        <button onClick={() => removeId(cid)} className="rounded border px-2 py-1 text-xs hover:bg-white/10">✕</button>
-                      </div>
-                    </div>
-
-                    <div className="p-4 text-sm space-y-2">
-                      <div className="text-xs text-muted-foreground">{u.city} • {u.address}</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>Type: <b>{u.Type}</b></div>
-                        <div>Floor: <b>{u.Floor}</b></div>
-                        <div>Area: <b>{u.GrossAreaSQM} sqm</b></div>
-                        <div>Facing: <b>{u.Facing || "-"}</b></div>
-                        <div>Status: <b>{u.Status}</b></div>
-                        <div>RFO: <b>{u.RFODate || "TBA"}</b></div>
-                      </div>
-
-                      <div className="mt-2 rounded-lg border">
-                        <div className="px-3 py-2 bg-slate-50 font-medium">Pricing</div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>List Price</span>
-                          <b className="ph-currency">{fmtPhp(u.ListPrice)}</b>
-                        </div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>Price / SQM</span>
-                          <b className="ph-currency">{fmtPhp(u.PerSQM)}</b>
-                        </div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>TCP (disc {discountPct}%)</span>
-                          <b className="ph-currency">{fmtPhp(c.TCP)}</b>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 rounded-lg border">
-                        <div className="px-3 py-2 bg-slate-50 font-medium">Downpayment</div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>DP {downPct}%</span>
-                          <b className="ph-currency">{fmtPhp(c.dpAmount)}</b>
-                        </div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>Reservation</span>
-                          <b className="ph-currency">{fmtPhp(reservationFee)}</b>
-                        </div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>Net DP</span>
-                          <b className="ph-currency">{fmtPhp(c.netDp)}</b>
-                        </div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>DP Monthly ({monthsToPay} mos)</span>
-                          <b className="ph-currency">{fmtPhp(c.dpMonthly)}</b>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 rounded-lg border">
-                        <div className="px-3 py-2 bg-slate-50 font-medium">Bank</div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>Closing Fee {closingFeePct}%</span>
-                          <b className="ph-currency">{fmtPhp(c.closingFee)}</b>
-                        </div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>Balance</span>
-                          <b className="ph-currency">{fmtPhp(c.bankBalance)}</b>
-                        </div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>15 yrs @ {rate15yr}%</span>
-                          <b className="ph-currency">{fmtPhp(c.monthly15)}</b>
-                        </div>
-                        <div className="px-3 py-2 flex items-center justify-between">
-                          <span>20 yrs @ {rate20yr}%</span>
-                          <b className="ph-currency">{fmtPhp(c.monthly20)}</b>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Exports (mobile) */}
-            {comparedUnits.length > 0 && (
-              <div className="mt-3 flex items-center gap-2">
-                <button onClick={downloadPNG} className="btn btn-outline">PNG</button>
-                <button onClick={downloadPDF} className="btn btn-outline">PDF</button>
-                <button onClick={downloadExcel} className="btn btn-primary">Excel</button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Desktop floating adjustments panel (draggable-ish) */}
-      <div
-        className={`hidden lg:block fixed z-40 ${floatingDocked ? "top-24 right-6" : "top-24 left-1/2 -translate-x-1/2"}`}
-      >
-        <div className="rounded-2xl shadow-2xl border bg-white p-3">
-          <div className="text-xs font-medium pb-2 border-b">Quick Adjust</div>
-          <div className="grid grid-cols-3 gap-2 pt-2">
-            <input className="px-2 py-1 border rounded text-xs" type="number" step={0.1} value={discountPct} onChange={(e) => setDiscountPct(Number(e.target.value || 0))} placeholder="Discount %" />
-            <input className="px-2 py-1 border rounded text-xs" type="number" step={0.1} value={downPct} onChange={(e) => setDownPct(Number(e.target.value || 0))} placeholder="DP %" />
-            <input className="px-2 py-1 border rounded text-xs" type="number" step={1} value={monthsToPay} onChange={(e) => setMonthsToPay(Math.max(1, Math.floor(Number(e.target.value || 0))))} placeholder="Months" />
-            <input className="px-2 py-1 border rounded text-xs" type="number" step={1000} value={reservationFee} onChange={(e) => setReservationFee(Math.max(0, Math.floor(Number(e.target.value || 0))))} placeholder="Reservation" />
-            <input className="px-2 py-1 border rounded text-xs" type="number" step={0.1} value={closingFeePct} onChange={(e) => setClosingFeePct(Number(e.target.value || 0))} placeholder="Closing %" />
-            <div className="grid grid-cols-2 gap-2">
-              <input className="px-2 py-1 border rounded text-xs" type="number" step={0.1} value={rate15yr} onChange={(e) => setRate15yr(Number(e.target.value || 0))} placeholder="15 yrs %" />
-              <input className="px-2 py-1 border rounded text-xs" type="number" step={0.1} value={rate20yr} onChange={(e) => setRate20yr(Number(e.target.value || 0))} placeholder="20 yrs %" />
+        <div className="mt-6" ref={sheetRef}>
+          {/* Export-only heading + assumptions summary — hidden in the live UI (display:none),
+              shown only while withSheetFrozen has toggled it on for a PNG/PDF capture. */}
+          <div data-export-only="true" style={{ display: "none" }} className="mb-4">
+            <div className="text-lg font-bold text-foreground">Unit Comparison</div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Discount {discountPct}% • DP {downPct}% • Reservation{" "}
+              <span className="ph-currency">{fmtPhp(reservationFee)}</span> • {monthsToPay} mos to pay • Closing{" "}
+              {closingFeePct}% • Bank 15yr {rate15yr}% / 20yr {rate20yr}%
             </div>
           </div>
+
+          {loading && <div className="card p-6">Loading…</div>}
+          {loadError && (
+            <div className="card p-4 border border-red-200 bg-red-50 text-sm text-red-800">
+              <div className="font-semibold mb-1">Couldn’t load availability.</div>
+              <div className="opacity-80 break-all">{loadError}</div>
+              <button className="mt-2 rounded border px-3 py-1 text-xs" onClick={fetchRows}>Retry</button>
+            </div>
+          )}
+
+          {!loading && !comparedUnits.length && (
+            <div className="card p-8 text-center text-muted-foreground">
+              Pick at least two units from Availability, or add here via search, to compare them side-by-side.
+            </div>
+          )}
+
+          {comparedUnits.length > 0 && (
+            <>
+              {/* Desktop/tablet: side-by-side cards */}
+              <div
+                className="hidden md:flex gap-4 overflow-x-auto pb-1"
+                data-export-relax-overflow="true"
+              >
+                {computedUnits.map(renderUnitCard)}
+              </div>
+
+              {/* Mobile: stacked cards */}
+              <div className="md:hidden space-y-3">
+                {computedUnits.map(renderUnitCard)}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </main>
