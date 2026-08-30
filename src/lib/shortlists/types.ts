@@ -51,6 +51,12 @@ export type AvailabilityRow = {
   unit_id: string;
 };
 
-export type RtoInfo = { eligible: boolean; monthly?: number; memo?: string | null };
+// Explicit terminal states so the UI can never be left ambiguously "stuck":
+// "checking" while a lookup is in flight, then always resolves to exactly one
+// of eligible/not_eligible/error. "error" means the lookup itself failed (no
+// successful response from /api/rto-rate for any candidate type) — distinct
+// from "not_eligible", which means we successfully checked and it's a no.
+export type RtoStatus = "checking" | "eligible" | "not_eligible" | "error";
+export type RtoInfo = { status: RtoStatus; monthly?: number; memo?: string | null };
 
 export type UnitMode = "matched" | "missing" | "checking" | "unavailable";
