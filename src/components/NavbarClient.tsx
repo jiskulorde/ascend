@@ -31,25 +31,64 @@ type Props = {
   initialRole?: Exclude<Role, undefined>;
 };
 
-const AVAILABILITY_DROPDOWN: DropdownLink = {
+// "More" groups the pages that shouldn't compete visually with the core
+// sales tools. About is intentionally left out: no /about route exists yet
+// (see the Phase 2 navbar report) — add it back here once the public-site
+// phase creates that page, so this never links to a 404.
+const MORE_ITEMS: SimpleLink[] = [
+  { kind: "link", label: "Projects", href: "/projects" },
+  { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
+];
+
+const MORE_DROPDOWN: DropdownLink = {
   kind: "dropdown",
-  id: "availability",
-  label: "Availability",
-  items: [
-    { kind: "link", label: "Availability", href: "/availability" },
-    { kind: "link", label: "Summary", href: "/summary" },
-    { kind: "link", label: "Compare", href: "/compare" },
-  ],
+  id: "more",
+  label: "More",
+  items: MORE_ITEMS,
 };
 
-const MAIN_LINKS: NavLink[] = [
+// Logged-out visitors: marketing nav only. Full Availability, Summary,
+// Compare, and Shortlists are seller/buyer tools and must never appear here
+// — /availability itself already renders the capped public preview for
+// anonymous visitors (see src/app/availability/page.tsx).
+const ANON_LINKS: NavLink[] = [
   { kind: "link", label: "Home", href: "/" },
   { kind: "link", label: "Projects", href: "/projects" },
-  AVAILABILITY_DROPDOWN,
+  { kind: "link", label: "Availability", href: "/availability" },
   { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
-  { kind: "link", label: "About", href: "/about" },
-  
 ];
+
+// Authenticated CLIENT: full buyer toolset, but no Shortlists (seller-only).
+const CLIENT_LINKS: NavLink[] = [
+  { kind: "link", label: "Dashboard", href: "/dashboard" },
+  { kind: "link", label: "Availability", href: "/availability" },
+  { kind: "link", label: "Summary", href: "/summary" },
+  { kind: "link", label: "Compare", href: "/compare" },
+  MORE_DROPDOWN,
+];
+
+// AGENT/MANAGER/ADMIN: full seller toolset. Shortlists sits between Summary
+// and Compare per the approved nav order.
+const SELLER_LINKS: NavLink[] = [
+  { kind: "link", label: "Dashboard", href: "/dashboard" },
+  { kind: "link", label: "Availability", href: "/availability" },
+  { kind: "link", label: "Summary", href: "/summary" },
+  { kind: "link", label: "Shortlists", href: "/shortlists" },
+  { kind: "link", label: "Compare", href: "/compare" },
+  MORE_DROPDOWN,
+];
+
+const SELLER_ROLES: Exclude<Role, undefined>[] = ["AGENT", "MANAGER", "ADMIN"];
+
+// Purely presentational — the real access control lives in middleware.ts and
+// each page's own server-side guard (see src/app/*/page.tsx). This only
+// decides what the navbar *shows*, never what it enforces.
+function getMainLinks(isSignedIn: boolean, role: Role): NavLink[] {
+  if (!isSignedIn) return ANON_LINKS;
+
+  const effectiveRole = role || "CLIENT";
+  return SELLER_ROLES.includes(effectiveRole) ? SELLER_LINKS : CLIENT_LINKS;
+}
 
 export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
   const pathname = usePathname();
@@ -125,6 +164,13 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
     return pathname?.startsWith(href);
   };
 
+  const effectiveRole = role || "CLIENT";
+  const isSeller = SELLER_ROLES.includes(effectiveRole);
+  const mainLinks = getMainLinks(isSignedIn, role);
+  const mobileSectionTitle = !isSignedIn ? "EXPLORE" : isSeller ? "SALES TOOLS" : "TOOLS";
+  const mobilePrimaryLinks = mainLinks.filter((l): l is SimpleLink => l.kind === "link");
+  const mobileMoreLink = mainLinks.find((l): l is DropdownLink => l.kind === "dropdown");
+
   const shell =
     "bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 border-b border-border";
 
@@ -158,14 +204,16 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
           </Link>
 
           <div className="hidden items-center gap-1 md:flex">
-            {MAIN_LINKS.map((link) =>
+            {mainLinks.map((link) =>
               link.kind === "dropdown" ? (
                 <div key={link.id} className="relative">
                   <button
                     type="button"
                     onClick={() => setOpenDropdown((v) => (v === link.id ? null : link.id))}
                     className={`${navLinkBase} inline-flex items-center gap-1 ${
-                      openDropdown === link.id ? navLinkActive : ""
+                      openDropdown === link.id || link.items.some((i) => isActive(i.href))
+                        ? navLinkActive
+                        : ""
                     }`}
                   >
                     {link.label}
@@ -298,50 +346,50 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
 
       {isOpenMobile && (
         <div className="border-t border-border bg-white md:hidden">
-          <div className="mx-auto max-w-7xl space-y-1 px-4 py-3">
-            {MAIN_LINKS.map((link) =>
-              link.kind === "dropdown" ? (
-                <details key={link.id} className="rounded-lg">
-                  <summary className="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 hover:bg-muted">
-                    {link.label} <ChevronDown size={16} />
-                  </summary>
-
-                  <div className="pl-3">
-                    {link.items.map((item) => (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className="block rounded-md px-3 py-2 hover:bg-muted"
-                        onClick={() => setIsOpenMobile(false)}
-                      >
-                        {item.label}
-                      </Link>
-                    ))}
-                  </div>
-                </details>
-              ) : (
+          <div className="mx-auto max-w-7xl space-y-4 px-4 py-3">
+            <div className="space-y-1">
+              <p className="px-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                {mobileSectionTitle}
+              </p>
+              {mobilePrimaryLinks.map((link) => (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="block rounded-lg px-3 py-2 hover:bg-muted"
+                  className={`block rounded-lg px-3 py-2 text-sm ${
+                    isActive(link.href)
+                      ? "bg-slate-100 font-medium text-[color:var(--primary)]"
+                      : "hover:bg-muted"
+                  }`}
                   onClick={() => setIsOpenMobile(false)}
                 >
                   {link.label}
                 </Link>
-              )
+              ))}
+            </div>
+
+            {mobileMoreLink && (
+              <div className="space-y-1 border-t border-border pt-3">
+                <p className="px-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  {mobileMoreLink.label.toUpperCase()}
+                </p>
+                {mobileMoreLink.items.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`block rounded-lg px-3 py-2 text-sm ${
+                      isActive(item.href)
+                        ? "bg-slate-100 font-medium text-[color:var(--primary)]"
+                        : "hover:bg-muted"
+                    }`}
+                    onClick={() => setIsOpenMobile(false)}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
             )}
 
-            <div className="space-y-2 pt-2">
-              {isSignedIn && (
-                <Link
-                  href="/dashboard"
-                  className="block rounded-lg bg-[color:var(--primary)] px-3 py-2 text-center text-sm font-medium text-[color:var(--primary-foreground)]"
-                  onClick={() => setIsOpenMobile(false)}
-                >
-                  Open dashboard
-                </Link>
-              )}
-
+            <div className="space-y-2 border-t border-border pt-3">
               {isSignedIn ? (
                 <form action="/auth/signout" method="post">
                   <button className="btn btn-outline btn-block">Sign out</button>
