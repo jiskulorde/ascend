@@ -1,77 +1,37 @@
-"use client";
+// src/app/computation/page.tsx
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import Select from "react-select";
+import { redirect } from "next/navigation";
+import { serverSupabase } from "@/lib/supabase/server";
+import ComputationHubClient from "@/components/computation/ComputationHubClient";
 
-type UnitRow = {
-  property_name: string;
-  city: string;
-  address: string;
-  tower_code: string;
-  tower_name: string;
-  BuildingUnit: string;
-  Type: string;
-  GrossAreaSQM: number;
-  ListPrice: number;
-  unit_id: string;
-};
+export const dynamic = "force-dynamic";
 
-type Option = { value: string; label: string };
+type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
 
-export default function ComputationHubPage() {
-  const router = useRouter();
-  const [rows, setRows] = useState<UnitRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const ALLOWED_ROLES: Role[] = ["CLIENT", "AGENT", "MANAGER", "ADMIN"];
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/availability", { cache: "no-store" });
-        const json = await res.json();
-        if (!json?.success) throw new Error("Failed to load availability");
-        setRows(json.data || []);
-      } catch (e: any) {
-        setError(e.message || "Something went wrong");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+export default async function ComputationHubPage() {
+  const supabase = await serverSupabase();
 
-  const options: Option[] = useMemo(
-    () =>
-      rows.map((u) => ({
-        value: u.unit_id,
-        label: `${u.property_name} • ${u.tower_name || u.tower_code} • ${u.BuildingUnit} • ₱${u.ListPrice.toLocaleString()}`,
-      })),
-    [rows]
-  );
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="max-w-3xl mx-auto p-6">
-        <h1 className="text-2xl font-semibold mb-2">Computation</h1>
-        <p className="text-sm text-muted-foreground mb-6">
-          Pick a unit to open its computation sheet.
-        </p>
+  if (!user) {
+    redirect("/auth/login?next=/computation");
+  }
 
-        <div className="bg-white rounded-xl p-4 shadow-sm border">
-          <Select
-            options={options}
-            placeholder="Search unit…"
-            onChange={(opt) => {
-              const id = (opt as Option)?.value;
-              if (id) router.push(`/computation/${encodeURIComponent(id)}`);
-            }}
-          />
-        </div>
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
 
-        {loading && <div className="card p-6 mt-6">Loading…</div>}
-        {error && <div className="card p-6 mt-6 text-red-600">{error}</div>}
-      </div>
-    </main>
-  );
+  const role = (profile?.role || "CLIENT") as Role;
+
+  if (!ALLOWED_ROLES.includes(role)) {
+    redirect("/403");
+  }
+
+  return <ComputationHubClient />;
 }

@@ -13,9 +13,19 @@ const guards: Array<{
   { prefix: "/manager", allow: ["MANAGER", "ADMIN"] },
   { prefix: "/dashboard", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
 
-  // Your Availability page already allows CLIENT, AGENT, and MANAGER.
-  // Keep this consistent with src/app/availability/page.tsx.
-  { prefix: "/availability", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
+  // /availability is NOT guarded here on purpose: anonymous visitors must
+  // reach it to see the public preview (see src/app/availability/page.tsx,
+  // which branches internally between the preview and full experience).
+  // The full dataset itself is protected at the API layer instead —
+  // GET /api/availability requires a session; GET /api/availability/preview
+  // is the public, row-capped endpoint the preview UI calls.
+
+  // Summary, Compare, and Computation have no public mode — every role
+  // (including CLIENT) requires a session, matching each page's own
+  // server-side guard. Kept here too for defense-in-depth.
+  { prefix: "/summary", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
+  { prefix: "/compare", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
+  { prefix: "/computation", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
 ];
 
 function redirectToLogin(req: NextRequest) {
@@ -102,6 +112,8 @@ export const config = {
     "/agent/:path*",
     "/manager/:path*",
     "/dashboard/:path*",
-    "/availability/:path*",
+    "/summary/:path*",
+    "/compare/:path*",
+    "/computation/:path*",
   ],
 };
