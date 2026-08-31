@@ -244,7 +244,18 @@ export default function UsersAdminClient({ admin, initialUsers }: Props) {
                   </div>
                 </td>
                 <td className="px-4 py-3 align-top text-slate-700">
-                  {u.email ?? "—"}
+                  {u.email === undefined ? (
+                    <span
+                      className="text-amber-600"
+                      title="No matching Supabase Auth account was found for this profile."
+                    >
+                      Account data mismatch
+                    </span>
+                  ) : u.email ? (
+                    u.email
+                  ) : (
+                    <span className="text-slate-400">No email</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 align-top">{roleBadge(u.role)}</td>
                 <td className="px-4 py-3 align-top">
