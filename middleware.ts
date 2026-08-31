@@ -8,24 +8,35 @@ type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
 const guards: Array<{
   prefix: string;
   allow: Role[];
+  // Where an authenticated-but-wrong-role request gets sent. Defaults to
+  // /403. Seller tools use "/" instead: CLIENT is a real, expected role for
+  // these prefixes (not an error condition), so it gets a plain redirect
+  // Home rather than a Forbidden page — see Phase 1 access matrix.
+  deniedRedirect?: string;
 }> = [
   { prefix: "/agent", allow: ["AGENT", "MANAGER", "ADMIN"] },
   { prefix: "/manager", allow: ["MANAGER", "ADMIN"] },
-  { prefix: "/dashboard", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
+
+  // CLIENT is a buyer account with no seller dashboard — every /dashboard/*
+  // route (including /dashboard/users, /dashboard/team, etc.) is seller/admin
+  // only. CLIENT gets sent Home, not /403, matching the seller-tool prefixes
+  // below rather than treating "CLIENT tried /dashboard" as an error state.
+  { prefix: "/dashboard", allow: ["AGENT", "MANAGER", "ADMIN"], deniedRedirect: "/" },
 
   // /availability is NOT guarded here on purpose: anonymous visitors must
   // reach it to see the public preview (see src/app/availability/page.tsx,
   // which branches internally between the preview and full experience).
   // The full dataset itself is protected at the API layer instead —
-  // GET /api/availability requires a session; GET /api/availability/preview
-  // is the public, row-capped endpoint the preview UI calls.
+  // GET /api/availability requires a session AND a seller role;
+  // GET /api/availability/preview is the public, row-capped endpoint the
+  // preview UI calls (CLIENT uses this same preview, not the full dataset).
 
-  // Summary, Compare, and Computation have no public mode — every role
-  // (including CLIENT) requires a session, matching each page's own
-  // server-side guard. Kept here too for defense-in-depth.
-  { prefix: "/summary", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
-  { prefix: "/compare", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
-  { prefix: "/computation", allow: ["CLIENT", "AGENT", "MANAGER", "ADMIN"] },
+  // Summary, Compare, and Computation are seller tools (AGENT/MANAGER/ADMIN)
+  // — CLIENT is a buyer account and is redirected Home, matching /dashboard
+  // above. Anonymous still hits the login redirect below (no session at all).
+  { prefix: "/summary", allow: ["AGENT", "MANAGER", "ADMIN"], deniedRedirect: "/" },
+  { prefix: "/compare", allow: ["AGENT", "MANAGER", "ADMIN"], deniedRedirect: "/" },
+  { prefix: "/computation", allow: ["AGENT", "MANAGER", "ADMIN"], deniedRedirect: "/" },
 ];
 
 function redirectToLogin(req: NextRequest) {
@@ -36,9 +47,9 @@ function redirectToLogin(req: NextRequest) {
   return NextResponse.redirect(url);
 }
 
-function redirectTo403(req: NextRequest) {
+function redirectToDenied(req: NextRequest, destination: string) {
   const url = req.nextUrl.clone();
-  url.pathname = "/403";
+  url.pathname = destination;
   url.search = "";
   return NextResponse.redirect(url);
 }
@@ -101,7 +112,7 @@ export async function middleware(req: NextRequest) {
   const role = (profile?.role || "CLIENT") as Role;
 
   if (!guard.allow.includes(role)) {
-    return redirectTo403(req);
+    return redirectToDenied(req, guard.deniedRedirect ?? "/403");
   }
 
   return res;

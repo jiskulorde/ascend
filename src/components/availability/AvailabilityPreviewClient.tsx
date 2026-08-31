@@ -34,6 +34,10 @@ type PreviewResponse = {
   filters: { projects: string[]; cities: string[]; types: string[] };
 };
 
+// These are what authorized DMCI Homes sellers use Ascend for — shown here
+// as context for what a property consultant can help with, not as something
+// a buyer account unlocks by signing in (see the Phase 1 messaging rewrite:
+// CLIENT accounts see this exact same preview, not the tools below).
 const FEATURES: { title: string; desc: string; icon: typeof Building2 }[] = [
   { title: "Full Inventory", desc: "Every available unit, not just a preview.", icon: Building2 },
   { title: "Lowest Price Summary", desc: "Instantly find the lowest-priced options.", icon: TrendingDown },
@@ -54,11 +58,15 @@ function fmtPhp(n: number) {
 }
 
 // Public, read-only preview of current inventory — shown at /availability to
-// anonymous visitors. Deliberately simpler than AvailabilityClient (the
-// authenticated seller/buyer experience): no Save to Shortlist, no Compare,
-// no advanced filters, and only the 1–3 pages / 12-per-page the server
-// allows (see src/app/api/availability/preview/route.ts, which enforces
-// this server-side regardless of anything sent from here).
+// anonymous visitors AND CLIENT accounts alike (Phase 1: a buyer account
+// signing in does not change what this page shows). Deliberately simpler
+// than AvailabilityClient (the AGENT/MANAGER/ADMIN-only seller experience):
+// no Save to Shortlist, no Compare, no advanced filters, and only the 1–3
+// pages / 12-per-page the server allows (see
+// src/app/api/availability/preview/route.ts, which enforces this
+// server-side regardless of anything sent from here). Messaging throughout
+// this page deliberately avoids implying that signing in (as a buyer) grants
+// the seller tools described below — only an authorized seller account does.
 export default function AvailabilityPreviewClient() {
   const [rows, setRows] = useState<PreviewRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,6 +133,7 @@ export default function AvailabilityPreviewClient() {
   }, [project, city, type]);
 
   const signInHref = `/auth/login?next=${encodeURIComponent("/availability")}`;
+  const buyersGuideHref = "/buyers-guide";
   const previewCap = 36;
   const hasMoreBeyondCap = totalMatching > previewCap;
 
@@ -141,17 +150,21 @@ export default function AvailabilityPreviewClient() {
               Available Homes Preview
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              Explore selected available DMCI Homes units. Sign in to unlock the full inventory,
-              advanced filters, lowest-price Summary, Compare, and payment computations.
+              Explore a selection of available DMCI Homes properties. Full
+              inventory and professional sales tools are available to
+              authorized property sellers.
             </p>
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Link href={signInHref} className={`btn btn-primary w-full sm:w-auto ${focusRing}`}>
-              Sign In
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Link href={buyersGuideHref} className={`btn btn-primary w-full sm:w-auto ${focusRing}`}>
+              Talk to a Property Consultant
             </Link>
-            <Link href={signInHref} className={`btn btn-outline w-full sm:w-auto ${focusRing}`}>
-              Create Account
+            <Link
+              href={signInHref}
+              className={`text-xs text-muted-foreground underline underline-offset-2 sm:ml-2 ${focusRing}`}
+            >
+              DMCI seller? Sign in
             </Link>
           </div>
         </section>
@@ -285,7 +298,7 @@ export default function AvailabilityPreviewClient() {
                       onClick={() => setPromptOpen(true)}
                       className={`btn btn-primary btn-block text-xs ${focusRing}`}
                     >
-                      Calculate Payment
+                      Request Details
                     </button>
                   </div>
                 </div>
@@ -322,10 +335,12 @@ export default function AvailabilityPreviewClient() {
               <div className="w-full max-w-sm rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center">
                 <p className="text-sm font-medium text-slate-800">Want to see more?</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Sign in to browse the full inventory.
+                  There are more available units than shown here. Talk to a
+                  property consultant for the complete list and options
+                  matched to you.
                 </p>
-                <Link href={signInHref} className={`btn btn-primary btn-sm mt-3 ${focusRing}`}>
-                  Sign In
+                <Link href={buyersGuideHref} className={`btn btn-primary btn-sm mt-3 ${focusRing}`}>
+                  Talk to a Property Consultant
                 </Link>
               </div>
             )}
@@ -335,8 +350,12 @@ export default function AvailabilityPreviewClient() {
         {/* ---------------- Feature value ---------------- */}
         <section className="card p-5 md:p-6">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            What signing in unlocks
+            Built for authorized DMCI Homes sellers
           </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            The tools below are what a property consultant uses to prepare
+            your options — they aren’t unlocked by creating a buyer account.
+          </p>
           <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
             {FEATURES.map(({ title, desc, icon: Icon }) => (
               <div key={title} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
@@ -346,6 +365,12 @@ export default function AvailabilityPreviewClient() {
               </div>
             ))}
           </div>
+          <Link
+            href={signInHref}
+            className={`mt-4 inline-block text-xs text-muted-foreground underline underline-offset-2 ${focusRing}`}
+          >
+            DMCI seller? Sign in
+          </Link>
         </section>
       </div>
 

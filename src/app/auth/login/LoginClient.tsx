@@ -5,16 +5,11 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { browserSupabase } from "@/lib/supabase/client";
-
-function safeNextPath(value: string | null) {
-  if (!value) return "/dashboard";
-  if (!value.startsWith("/") || value.startsWith("//")) return "/dashboard";
-  return value;
-}
+import { parseExplicitNext, resolvePostLoginDestination } from "@/lib/auth/postLoginDestination";
 
 export default function LoginClient() {
   const search = useSearchParams();
-  const next = useMemo(() => safeNextPath(search.get("next")), [search]);
+  const explicitNext = useMemo(() => parseExplicitNext(search.get("next")), [search]);
   const supabase = browserSupabase();
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -26,10 +21,10 @@ export default function LoginClient() {
 
   const [fullName, setFullName] = useState("");
 
-  async function goToNext() {
+  async function goToDestination(destination: string) {
     // Give Supabase a tiny moment to persist cookies, then force a real navigation.
     await new Promise((resolve) => setTimeout(resolve, 150));
-    window.location.assign(next);
+    window.location.assign(destination);
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -39,14 +34,22 @@ export default function LoginClient() {
 
     try {
       if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password: pass,
         });
 
         if (error) throw error;
 
-        await goToNext();
+        // No explicit ?next= (e.g. clicking "Sign in" from the navbar, not a
+        // redirected protected-route attempt): send sellers to their
+        // Dashboard, everyone else Home — an explicit next is always
+        // honored as-is regardless of role, see resolvePostLoginDestination.
+        const destination = data.user
+          ? await resolvePostLoginDestination(supabase, data.user.id, explicitNext)
+          : explicitNext ?? "/";
+
+        await goToDestination(destination);
         return;
       }
 
@@ -64,7 +67,8 @@ export default function LoginClient() {
       if (error) throw error;
 
       if (data.user?.id) {
-        await goToNext();
+        const destination = await resolvePostLoginDestination(supabase, data.user.id, explicitNext);
+        await goToDestination(destination);
         return;
       }
 
@@ -80,8 +84,14 @@ export default function LoginClient() {
     setBusy(true);
 
     try {
+      // Pass the explicit next through verbatim, or omit it entirely so
+      // /auth/redirect resolves its own role-aware default once the OAuth
+      // round trip completes and the signed-in user's role is known — role
+      // can't be resolved here, before the user has even authenticated.
       const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
-      const redirectTo = `${siteUrl}/auth/redirect?next=${encodeURIComponent(next)}`;
+      const redirectTo = explicitNext
+        ? `${siteUrl}/auth/redirect?next=${encodeURIComponent(explicitNext)}`
+        : `${siteUrl}/auth/redirect`;
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",

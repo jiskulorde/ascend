@@ -1,21 +1,19 @@
 // src/app/availability/page.tsx
 
 import { serverSupabase } from "@/lib/supabase/server";
+import { SELLER_ROLES, type Role } from "@/lib/auth/role";
 import AvailabilityClient from "@/components/availability/AvailabilityClient";
 import AvailabilityPreviewClient from "@/components/availability/AvailabilityPreviewClient";
 
 export const dynamic = "force-dynamic";
 
-type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
-
-const ALLOWED_ROLES: Role[] = ["CLIENT", "AGENT", "MANAGER", "ADMIN"];
-
-// /availability is intentionally reachable by both anonymous visitors (a
-// capped public preview backed by GET /api/availability/preview) and
-// authenticated CLIENT/AGENT/MANAGER/ADMIN users (the full seller experience
-// backed by GET /api/availability, which now requires a session). This page
-// no longer redirects anonymous visitors to login — that would defeat the
-// public preview requirement.
+// CRITICAL: full inventory (AvailabilityClient, backed by GET
+// /api/availability) is for AGENT/MANAGER/ADMIN only. Anonymous visitors AND
+// CLIENT both get the exact same capped public preview
+// (AvailabilityPreviewClient, backed by GET /api/availability/preview) — a
+// signed-in CLIENT is never routed to the full client just because they're
+// authenticated. This page never redirects anonymous visitors to login —
+// that would defeat the public preview requirement.
 export default async function AvailabilityPage() {
   const supabase = await serverSupabase();
 
@@ -35,10 +33,7 @@ export default async function AvailabilityPage() {
 
   const role = (profile?.role || "CLIENT") as Role;
 
-  // An authenticated session with an unrecognized role falls back to the
-  // public preview rather than a hard 403 — every real profile row is one of
-  // the four known roles, so this only guards against a missing/corrupt row.
-  if (!ALLOWED_ROLES.includes(role)) {
+  if (!SELLER_ROLES.includes(role)) {
     return <AvailabilityPreviewClient />;
   }
 

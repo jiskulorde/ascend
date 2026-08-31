@@ -3,16 +3,9 @@
 import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
 import SellerDashboardClient from "@/components/dashboard/SellerDashboardClient";
-import ClientDashboardClient from "@/components/dashboard/ClientDashboardClient";
+import { isSellerRole, type Role } from "@/lib/auth/role";
 
 export const dynamic = "force-dynamic";
-
-type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
-type SellerRole = "AGENT" | "MANAGER" | "ADMIN";
-
-function isSellerRole(role: Role): role is SellerRole {
-  return role === "AGENT" || role === "MANAGER" || role === "ADMIN";
-}
 
 export default async function DashboardPage() {
   const supabase = await serverSupabase();
@@ -33,12 +26,18 @@ export default async function DashboardPage() {
     .maybeSingle();
 
   const role = (profile?.role || "CLIENT") as Role;
+
+  // CLIENT is a buyer account with no seller dashboard (Phase 1 access
+  // matrix) — middleware already redirects CLIENT Home for every
+  // /dashboard/* path, but this page re-checks independently rather than
+  // assuming middleware ran first, matching every other protected page's
+  // defense-in-depth pattern.
+  if (!isSellerRole(role)) {
+    redirect("/");
+  }
+
   const fullName = profile?.full_name ?? null;
   const email = user.email ?? null;
 
-  if (isSellerRole(role)) {
-    return <SellerDashboardClient fullName={fullName} email={email} role={role} />;
-  }
-
-  return <ClientDashboardClient fullName={fullName} email={email} />;
+  return <SellerDashboardClient fullName={fullName} email={email} role={role} />;
 }

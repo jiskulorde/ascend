@@ -31,63 +31,94 @@ type Props = {
   initialRole?: Exclude<Role, undefined>;
 };
 
-// "More" groups the pages that shouldn't compete visually with the core
-// sales tools. About is intentionally left out: no /about route exists yet
-// (see the Phase 2 navbar report) — add it back here once the public-site
-// phase creates that page, so this never links to a 404.
-const MORE_ITEMS: SimpleLink[] = [
-  { kind: "link", label: "Projects", href: "/projects" },
-  { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
-];
+const SELLER_ROLES: Exclude<Role, undefined>[] = ["AGENT", "MANAGER", "ADMIN"];
 
-const MORE_DROPDOWN: DropdownLink = {
-  kind: "dropdown",
-  id: "more",
-  label: "More",
-  items: MORE_ITEMS,
-};
-
-// Logged-out visitors: marketing nav only. Full Availability, Summary,
-// Compare, and Shortlists are seller/buyer tools and must never appear here
-// — /availability itself already renders the capped public preview for
-// anonymous visitors (see src/app/availability/page.tsx).
-const ANON_LINKS: NavLink[] = [
+// Public/CLIENT nav — identical for both (Phase 1: CLIENT is a buyer account
+// with no seller tools, so it gets the exact same flat nav as an anonymous
+// visitor, not a cut-down version of the seller nav). No "More" dropdown —
+// five flat items is compact enough on its own.
+const PUBLIC_LINKS: NavLink[] = [
   { kind: "link", label: "Home", href: "/" },
   { kind: "link", label: "Projects", href: "/projects" },
   { kind: "link", label: "Availability", href: "/availability" },
   { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
+  { kind: "link", label: "About Us", href: "/about" },
 ];
 
-// Authenticated CLIENT: full buyer toolset, but no Shortlists (seller-only).
-const CLIENT_LINKS: NavLink[] = [
-  { kind: "link", label: "Dashboard", href: "/dashboard" },
-  { kind: "link", label: "Availability", href: "/availability" },
-  { kind: "link", label: "Summary", href: "/summary" },
-  { kind: "link", label: "Compare", href: "/compare" },
-  MORE_DROPDOWN,
-];
+// AGENT/MANAGER: full seller toolset. MANAGER gets the identical nav for now
+// — a "My Agents"/"Agents" entry was scoped for this phase but there is no
+// real, non-placeholder route to point it at yet (dashboard/team is an
+// unscoped "every non-client account" list, not a per-manager roster), so it
+// is deliberately not added rather than shipping a fake link.
+const SELLER_MORE_DROPDOWN: DropdownLink = {
+  kind: "dropdown",
+  id: "seller-more",
+  label: "More",
+  items: [
+    { kind: "link", label: "Computation", href: "/computation" },
+    { kind: "link", label: "Projects", href: "/projects" },
+    { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
+    { kind: "link", label: "About Us", href: "/about" },
+  ],
+};
 
-// AGENT/MANAGER/ADMIN: full seller toolset. Shortlists sits between Summary
-// and Compare per the approved nav order.
 const SELLER_LINKS: NavLink[] = [
   { kind: "link", label: "Dashboard", href: "/dashboard" },
   { kind: "link", label: "Availability", href: "/availability" },
   { kind: "link", label: "Summary", href: "/summary" },
   { kind: "link", label: "Shortlists", href: "/shortlists" },
   { kind: "link", label: "Compare", href: "/compare" },
-  MORE_DROPDOWN,
+  SELLER_MORE_DROPDOWN,
 ];
 
-const SELLER_ROLES: Exclude<Role, undefined>[] = ["AGENT", "MANAGER", "ADMIN"];
+// ADMIN: governance-first nav rather than an Agent navbar with an extra
+// badge. Sales Tools groups every seller page behind one dropdown so the top
+// level reads as "Control Center / Accounts / Sales Tools / More" per the
+// Phase 1 nav matrix. Approvals/Audit Logs/Security/Subscriptions are
+// deliberately absent — those routes don't exist yet.
+const ADMIN_SALES_TOOLS_DROPDOWN: DropdownLink = {
+  kind: "dropdown",
+  id: "admin-sales-tools",
+  label: "Sales Tools",
+  items: [
+    { kind: "link", label: "Availability", href: "/availability" },
+    { kind: "link", label: "Summary", href: "/summary" },
+    { kind: "link", label: "Shortlists", href: "/shortlists" },
+    { kind: "link", label: "Compare", href: "/compare" },
+    { kind: "link", label: "Computation", href: "/computation" },
+  ],
+};
+
+const ADMIN_MORE_DROPDOWN: DropdownLink = {
+  kind: "dropdown",
+  id: "admin-more",
+  label: "More",
+  items: [
+    { kind: "link", label: "Projects", href: "/projects" },
+    { kind: "link", label: "Buyer’s Guide", href: "/buyers-guide" },
+    { kind: "link", label: "About Us", href: "/about" },
+  ],
+};
+
+const ADMIN_LINKS: NavLink[] = [
+  { kind: "link", label: "Control Center", href: "/dashboard" },
+  { kind: "link", label: "Accounts", href: "/dashboard/users" },
+  ADMIN_SALES_TOOLS_DROPDOWN,
+  ADMIN_MORE_DROPDOWN,
+];
 
 // Purely presentational — the real access control lives in middleware.ts and
 // each page's own server-side guard (see src/app/*/page.tsx). This only
 // decides what the navbar *shows*, never what it enforces.
 function getMainLinks(isSignedIn: boolean, role: Role): NavLink[] {
-  if (!isSignedIn) return ANON_LINKS;
+  if (!isSignedIn) return PUBLIC_LINKS;
 
-  const effectiveRole = role || "CLIENT";
-  return SELLER_ROLES.includes(effectiveRole) ? SELLER_LINKS : CLIENT_LINKS;
+  if (role === "ADMIN") return ADMIN_LINKS;
+  if (role === "AGENT" || role === "MANAGER") return SELLER_LINKS;
+
+  // CLIENT (or a signed-in session with no recognized role yet) — same
+  // public nav as an anonymous visitor, never the seller toolset.
+  return PUBLIC_LINKS;
 }
 
 export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
@@ -167,9 +198,19 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
   const effectiveRole = role || "CLIENT";
   const isSeller = SELLER_ROLES.includes(effectiveRole);
   const mainLinks = getMainLinks(isSignedIn, role);
-  const mobileSectionTitle = !isSignedIn ? "EXPLORE" : isSeller ? "SALES TOOLS" : "TOOLS";
+
+  const mobileSectionTitle = !isSignedIn
+    ? "EXPLORE"
+    : role === "ADMIN"
+    ? "GOVERNANCE"
+    : isSeller
+    ? "SALES TOOLS"
+    : "EXPLORE";
+
   const mobilePrimaryLinks = mainLinks.filter((l): l is SimpleLink => l.kind === "link");
-  const mobileMoreLink = mainLinks.find((l): l is DropdownLink => l.kind === "dropdown");
+  // Admin has two dropdowns (Sales Tools + More) — render every dropdown in
+  // mainLinks as its own mobile section, not just the first one found.
+  const mobileDropdowns = mainLinks.filter((l): l is DropdownLink => l.kind === "dropdown");
 
   const shell =
     "bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 border-b border-border";
@@ -183,9 +224,14 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
   const dropdownPanel =
     "absolute left-0 mt-2 w-56 rounded-2xl border border-slate-100 bg-white text-slate-900 shadow-xl z-40 py-1";
 
+  // CLIENT has no dashboard to open (Phase 1: buyer accounts get no seller
+  // dashboard) — the profile menu only offers it to seller/admin roles.
+  const canOpenDashboard = isSeller;
+  const dashboardLinkLabel = role === "ADMIN" ? "Open Control Center" : "Open dashboard";
+
   const profileLabel =
     role === "ADMIN"
-      ? "Admin dashboard"
+      ? "Control Center"
       : role === "MANAGER"
       ? "Manager dashboard"
       : role === "AGENT"
@@ -295,13 +341,15 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
                   </div>
 
                   <div className="py-1">
-                    <Link
-                      href="/dashboard"
-                      className="block px-3 py-2 text-sm hover:bg-muted"
-                      onClick={() => setProfileOpen(false)}
-                    >
-                      Open dashboard
-                    </Link>
+                    {canOpenDashboard && (
+                      <Link
+                        href="/dashboard"
+                        className="block px-3 py-2 text-sm hover:bg-muted"
+                        onClick={() => setProfileOpen(false)}
+                      >
+                        {dashboardLinkLabel}
+                      </Link>
+                    )}
 
                     {(role === "MANAGER" || role === "ADMIN") && (
                       <div className="flex items-center justify-between px-3 py-2 text-xs text-slate-600">
@@ -367,12 +415,12 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
               ))}
             </div>
 
-            {mobileMoreLink && (
-              <div className="space-y-1 border-t border-border pt-3">
+            {mobileDropdowns.map((dropdown) => (
+              <div key={dropdown.id} className="space-y-1 border-t border-border pt-3">
                 <p className="px-3 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                  {mobileMoreLink.label.toUpperCase()}
+                  {dropdown.label.toUpperCase()}
                 </p>
-                {mobileMoreLink.items.map((item) => (
+                {dropdown.items.map((item) => (
                   <Link
                     key={item.href}
                     href={item.href}
@@ -387,7 +435,7 @@ export default function NavbarClient({ initialSignedIn, initialRole }: Props) {
                   </Link>
                 ))}
               </div>
-            )}
+            ))}
 
             <div className="space-y-2 border-t border-border pt-3">
               {isSignedIn ? (

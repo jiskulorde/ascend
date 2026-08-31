@@ -40,17 +40,19 @@ export default function Footer() {
             </div>
           </div>
 
-          {/* Navigation */}
+          {/* Navigation — public/buyer-safe for every visitor regardless of
+              role, same as the Explore section of the signed-out Navbar.
+              Seller tools (Summary, Compare, Dashboard, etc.) already live in
+              the authenticated Navbar and are deliberately not duplicated
+              here — see Phase "Final role-access cleanup". */}
           <div>
             <SectionTitle>Explore</SectionTitle>
             <ul className="space-y-2 text-sm">
+              <Li href="/">Home</Li>
               <Li href="/projects">Projects</Li>
-              <Li href="/properties">Properties</Li>
-              <Li href="/compare">Compare</Li>
-              <Li href="/summary">Summary</Li>
-              <Li href="/looker">Availability (Looker)</Li>
-              <Li href="/clients">Clients</Li>
-              <Li href="/dashboard">Dashboard</Li>
+              <Li href="/availability">Availability</Li>
+              <Li href="/buyers-guide">Buyer’s Guide</Li>
+              <Li href="/about">About Us</Li>
             </ul>
           </div>
 
@@ -71,14 +73,9 @@ export default function Footer() {
                 external
               />
               <LiIcon
-                href="/clients"
+                href="/buyers-guide"
                 icon={<ArrowUpRight className="h-4 w-4" />}
                 label="Find an Agent"
-              />
-              <LiIcon
-                href="/manager"
-                icon={<ArrowUpRight className="h-4 w-4" />}
-                label="Manager Console"
               />
               {/* keep email link if you have a central inbox; otherwise remove */}
               <LiIcon

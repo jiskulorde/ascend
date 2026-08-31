@@ -5,9 +5,10 @@ import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
 
 // Auth guard only. middleware.ts (repo root) already requires a signed-in
-// session for every /dashboard/:path* request regardless of role — this is
-// defense-in-depth matching the same inline-guard pattern every other
-// protected page in the app uses (see src/app/summary/page.tsx,
+// session AND an AGENT/MANAGER/ADMIN role for every /dashboard/:path*
+// request (CLIENT is redirected Home there, before this layout even runs) —
+// this is defense-in-depth matching the same inline-guard pattern every
+// other protected page in the app uses (see src/app/summary/page.tsx,
 // src/app/shortlists/page.tsx, etc.), not the primary enforcement.
 //
 // The global Navbar (src/components/Navbar.tsx, rendered once in the root

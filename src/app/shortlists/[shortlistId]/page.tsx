@@ -2,16 +2,15 @@
 
 import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
+import { SELLER_ROLES, type Role } from "@/lib/auth/role";
 import ShortlistDetailClient from "@/components/shortlists/ShortlistDetailClient";
 
 export const dynamic = "force-dynamic";
 
-type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
-
-// Mirrors the seller-role gate enforced by requireSellerSession() on the
-// /api/shortlists routes and by RLS in the client_shortlists migration.
-const SELLER_ROLES: Role[] = ["AGENT", "MANAGER", "ADMIN"];
-
+// This is page-level UX only. The seller-role gate itself is still enforced
+// independently by requireSellerSession() on every /api/shortlists route and
+// by RLS in the client_shortlists migration — neither was weakened here.
+// CLIENT now gets sent Home instead of /403, matching shortlists/page.tsx.
 export default async function ShortlistDetailPage({
   params,
 }: {
@@ -37,7 +36,7 @@ export default async function ShortlistDetailPage({
   const role = (profile?.role || "CLIENT") as Role;
 
   if (!SELLER_ROLES.includes(role)) {
-    redirect("/403");
+    redirect("/");
   }
 
   // Ownership/existence is checked client-side via GET /api/shortlists/[id] so the

@@ -2,17 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
+import { SELLER_ROLES, type Role } from "@/lib/auth/role";
 import SummaryClient from "@/components/summary/SummaryClient";
 
 export const dynamic = "force-dynamic";
 
-type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
-
-// Summary is a seller/buyer tool — any authenticated role may use it, but it
-// must never be reachable by an anonymous visitor. Mirrors the guard pattern
-// already used by src/app/availability/page.tsx and src/app/shortlists/page.tsx.
-const ALLOWED_ROLES: Role[] = ["CLIENT", "AGENT", "MANAGER", "ADMIN"];
-
+// Summary is a seller tool (AGENT/MANAGER/ADMIN) — CLIENT is a buyer account
+// and is sent Home, not /403 (Phase 1 access matrix); anonymous still hits
+// the login redirect below (no session at all).
 export default async function SummaryPage() {
   const supabase = await serverSupabase();
 
@@ -32,8 +29,8 @@ export default async function SummaryPage() {
 
   const role = (profile?.role || "CLIENT") as Role;
 
-  if (!ALLOWED_ROLES.includes(role)) {
-    redirect("/403");
+  if (!SELLER_ROLES.includes(role)) {
+    redirect("/");
   }
 
   return <SummaryClient />;

@@ -2,20 +2,18 @@
 
 import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
+import { SELLER_ROLES, type Role } from "@/lib/auth/role";
 import ClientPropertiesClient from "@/components/clients/ClientPropertiesClient";
 
 export const dynamic = "force-dynamic";
 
-type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
-
 // This page is an orphaned, un-audited legacy inventory listing (no seller
 // actions — the "View Details" button isn't wired to anything, so it isn't
-// treated as a seller tool). It's not linked from primary navigation and
-// isn't being redesigned here; it's only being closed off as an anonymous
-// full-inventory bypass now that GET /api/availability requires a session.
-// Any authenticated role may still reach it, same as before this fix.
-const ALLOWED_ROLES: Role[] = ["CLIENT", "AGENT", "MANAGER", "ADMIN"];
-
+// treated as a seller tool) and fetches full inventory from GET
+// /api/availability, which is now AGENT/MANAGER/ADMIN-only. It's not linked
+// from primary navigation and isn't being redesigned here — just brought in
+// line with the same role rule as every other full-inventory page, so a
+// CLIENT never lands on a broken empty page after that API returns 403.
 export default async function ClientsPage() {
   const supabase = await serverSupabase();
 
@@ -35,8 +33,8 @@ export default async function ClientsPage() {
 
   const role = (profile?.role || "CLIENT") as Role;
 
-  if (!ALLOWED_ROLES.includes(role)) {
-    redirect("/403");
+  if (!SELLER_ROLES.includes(role)) {
+    redirect("/");
   }
 
   return <ClientPropertiesClient />;

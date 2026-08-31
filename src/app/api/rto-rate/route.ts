@@ -1,11 +1,22 @@
 import { NextResponse, NextRequest } from "next/server";
 import { serverSupabase } from "@/lib/supabase/server";
+import { requireSellerSession } from "@/lib/shortlists/authz";
 
 /**
  * GET /api/rto-rate?project_code=AGP&unit_type=2BR&area=57
  * Returns: { eligible:boolean, monthly_rate?:number, memo_ref?:string, match?:{area_min:number|null, area_max:number|null} }
+ *
+ * Called only from Compare/Computation (both AGENT/MANAGER/ADMIN-only pages),
+ * but had no auth check of its own (found during the Phase 1 API audit) — a
+ * CLIENT or anonymous caller could hit this directly even with the pages
+ * locked down. Gated with the same requireSellerSession() helper the
+ * shortlists API routes already use, rather than a new auth check.
  */
 export async function GET(req: NextRequest) {
+  const supabase = await serverSupabase();
+  const authz = await requireSellerSession(supabase);
+  if (!authz.ok) return authz.response;
+
   const url = new URL(req.url);
   const project_code = (url.searchParams.get("project_code") || "").trim().toUpperCase();
   const unit_type = (url.searchParams.get("unit_type") || "").trim().toUpperCase();
@@ -18,8 +29,6 @@ export async function GET(req: NextRequest) {
       { status: 400 }
     );
   }
-
-  const supabase = await serverSupabase();
 
   // pull all active rows for that project/type
   const { data, error } = await supabase

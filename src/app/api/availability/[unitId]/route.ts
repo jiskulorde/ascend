@@ -1,13 +1,48 @@
 // app/api/availability/[unitId]/route.ts
 import { NextResponse } from "next/server";
 import { getGoogleSheetValues } from "@/lib/googleSheets";
+import { serverSupabase } from "@/lib/supabase/server";
+import { SELLER_ROLES, type Role } from "@/lib/auth/role";
 
+// Returns the full, unfiltered sheet row for a single unit — the same
+// full-inventory sensitivity as GET /api/availability, just scoped to one
+// row. Previously had no auth check at all (found during the Phase 1 API
+// audit) despite not being called from any current client code; locked down
+// to the same AGENT/MANAGER/ADMIN-only rule as the rest of full inventory
+// rather than left open because nothing currently calls it.
 export async function GET(
   req: Request,
   context: { params: Promise<{ unitId: string }> }
 ) {
   const { unitId } = await context.params; // ✅ must await params
   try {
+    const supabase = await serverSupabase();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required." },
+        { status: 401 }
+      );
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const role = (profile?.role || "CLIENT") as Role;
+
+    if (!SELLER_ROLES.includes(role)) {
+      return NextResponse.json(
+        { success: false, error: "Forbidden." },
+        { status: 403 }
+      );
+    }
+
     const spreadsheetId = process.env.GOOGLE_SHEET_AVAILABILITY_ID || "";
     const range = process.env.GOOGLE_SHEET_AVAILABILITY_RANGE || "Database!A1:L";
 

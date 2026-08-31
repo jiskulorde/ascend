@@ -16,27 +16,29 @@ import {
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Path to return to after sign-in. Defaults to the public Availability preview. */
+  /** Path to return to after a seller sign-in. Defaults to the public Availability preview. */
   next?: string;
 };
 
 const BENEFITS = [
-  "Complete unit inventory",
-  "Advanced filters",
-  "Lowest Price Summary",
-  "Unit Comparison",
-  "Payment Computations",
+  "Full unit and pricing details",
+  "Financing and payment options explained",
+  "Recommendations matched to your needs",
+  "No-pressure guidance",
 ];
 
 const focusRing =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)] focus-visible:ring-offset-2";
 
-// Reused everywhere a protected action (Calculate Payment, Compare, etc.) is
-// attempted from the public Availability preview — see
-// AvailabilityPreviewClient.tsx. Built on the existing Radix Dialog
+// Reused wherever the public Availability preview offers a buyer a next step
+// (see AvailabilityPreviewClient.tsx's "Request Details" button). This is a
+// buyer-facing dialog — it points toward the Buyer's Guide / a property
+// consultant, not toward creating an account, since a buyer (CLIENT) account
+// does not grant the seller tools sign-in used to promise here. The "DMCI
+// seller? Sign in" line stays, small and secondary, for the rare case a
+// seller lands on this page signed out. Built on the existing Radix Dialog
 // primitive (src/components/ui/dialog.tsx), the same one
-// SaveToShortlistDialog already uses, so this needs no new dependency and
-// gets focus-trapping / Escape-to-close / labeled-dialog semantics for free.
+// SaveToShortlistDialog already uses.
 export default function SignInPromptDialog({ open, onOpenChange, next = "/availability" }: Props) {
   const signInHref = `/auth/login?next=${encodeURIComponent(next)}`;
 
@@ -44,8 +46,10 @@ export default function SignInPromptDialog({ open, onOpenChange, next = "/availa
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Unlock Full Property Tools</DialogTitle>
-          <DialogDescription>Sign in to access:</DialogDescription>
+          <DialogTitle>Request Property Details</DialogTitle>
+          <DialogDescription>
+            Connect with a DMCI-authorized property consultant for:
+          </DialogDescription>
         </DialogHeader>
 
         <ul className="space-y-2 text-sm">
@@ -65,15 +69,15 @@ export default function SignInPromptDialog({ open, onOpenChange, next = "/availa
           >
             Not now
           </button>
-          <Link href={signInHref} className={`btn btn-primary ${focusRing}`}>
-            Sign In
+          <Link href="/buyers-guide" className={`btn btn-primary ${focusRing}`}>
+            Talk to a Consultant
           </Link>
         </DialogFooter>
 
         <p className="text-center text-xs text-muted-foreground">
-          New here?{" "}
+          DMCI seller?{" "}
           <Link href={signInHref} className={`underline rounded ${focusRing}`}>
-            Create an account
+            Sign in
           </Link>
         </p>
       </DialogContent>

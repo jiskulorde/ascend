@@ -97,15 +97,17 @@ function Lightbox({
 
 /* ---------------- Page ---------------- */
 
-export default function AGPPageClient({ isAuthenticated }: { isAuthenticated: boolean }) {
+export default function AGPPageClient({ canViewFullInventory }: { canViewFullInventory: boolean }) {
   const [units, setUnits] = useState<UnitRow[]>([]);
   const [lightbox, setLightbox] = useState<{ images: string[]; index: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    // Authenticated visitors: full dataset from GET /api/availability. The
-    // original mapping here read raw-sheet-style keys (e.g. p["Building
+    // AGENT/MANAGER/ADMIN only: full dataset from GET /api/availability
+    // (CLIENT no longer qualifies here — see canViewFullInventory in
+    // src/app/projects/AGP/page.tsx). The original mapping here read
+    // raw-sheet-style keys (e.g. p["Building
     // Unit"], p["List Price"]) that don't exist on that endpoint's actual
     // response shape (see AvailabilityRow in
     // src/lib/availability/inventory.ts) — every field came through as ""/0,
@@ -133,8 +135,8 @@ export default function AGPPageClient({ isAuthenticated }: { isAuthenticated: bo
       setUnits(normalized);
     }
 
-    // Anonymous visitors never touch the full authenticated endpoint — this
-    // pulls only AGP's public preview rows (server-side capped at 3 pages /
+    // Anonymous visitors and CLIENT alike never touch the full seller
+    // endpoint — this pulls only AGP's public preview rows (server-side capped at 3 pages /
     // 12 rows each, see src/app/api/availability/preview/route.ts) and maps
     // only the fields this page actually renders (Type/Tower/ListPrice, via
     // the "lowest price by type" table below). Everything else on UnitRow is
@@ -175,7 +177,7 @@ export default function AGPPageClient({ isAuthenticated }: { isAuthenticated: bo
       if (!cancelled) setUnits(merged);
     }
 
-    if (isAuthenticated) {
+    if (canViewFullInventory) {
       loadAuthenticated();
     } else {
       loadPreview();
@@ -184,7 +186,7 @@ export default function AGPPageClient({ isAuthenticated }: { isAuthenticated: bo
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated]);
+  }, [canViewFullInventory]);
 
   const lowestByType = useMemo(() => {
     const agpUnits = units.filter((u) =>

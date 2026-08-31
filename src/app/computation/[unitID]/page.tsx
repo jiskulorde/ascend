@@ -2,14 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
+import { SELLER_ROLES, type Role } from "@/lib/auth/role";
 import ComputationDetailClient from "@/components/computation/ComputationDetailClient";
 
 export const dynamic = "force-dynamic";
 
-type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
-
-const ALLOWED_ROLES: Role[] = ["CLIENT", "AGENT", "MANAGER", "ADMIN"];
-
+// Computation is a seller tool (AGENT/MANAGER/ADMIN) — CLIENT is a buyer
+// account and is sent Home, not /403 (Phase 1 access matrix); anonymous
+// still hits the login redirect below (no session at all).
 export default async function ComputationDetailPage({
   params,
 }: {
@@ -34,8 +34,8 @@ export default async function ComputationDetailPage({
 
   const role = (profile?.role || "CLIENT") as Role;
 
-  if (!ALLOWED_ROLES.includes(role)) {
-    redirect("/403");
+  if (!SELLER_ROLES.includes(role)) {
+    redirect("/");
   }
 
   return <ComputationDetailClient />;
