@@ -25,19 +25,6 @@ export default function LoginClient() {
   const [pass, setPass] = useState("");
 
   const [fullName, setFullName] = useState("");
-  const [phone, setPhone] = useState("");
-
-  async function upsertProfile(userId: string) {
-    const payload: Record<string, string> = {
-      id: userId,
-      role: "CLIENT",
-    };
-
-    if (fullName.trim()) payload.full_name = fullName.trim();
-    if (phone.trim()) payload.phone = phone.trim();
-
-    await supabase.from("profiles").upsert(payload, { onConflict: "id" });
-  }
 
   async function goToNext() {
     // Give Supabase a tiny moment to persist cookies, then force a real navigation.
@@ -66,14 +53,17 @@ export default function LoginClient() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password: pass,
+        options: {
+          // Picked up by the public.handle_new_user() trigger on auth.users,
+          // which is what actually creates the profiles row (id, full_name).
+          // Nothing here is browser-writable on profiles itself anymore.
+          data: fullName.trim() ? { full_name: fullName.trim() } : undefined,
+        },
       });
 
       if (error) throw error;
 
-      const userId = data.user?.id;
-
-      if (userId) {
-        await upsertProfile(userId);
+      if (data.user?.id) {
         await goToNext();
         return;
       }
@@ -153,17 +143,6 @@ export default function LoginClient() {
                   className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2"
                   placeholder="Juan Dela Cruz"
                   autoComplete="name"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm text-muted-foreground">Phone optional</label>
-                <input
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2"
-                  placeholder="+63 912 345 6789"
-                  autoComplete="tel"
                 />
               </div>
             </div>
