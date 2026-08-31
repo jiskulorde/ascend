@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import { serverSupabase } from "@/lib/supabase/server";
 import { adminSupabase } from "@/lib/supabase/admin";
+import { applyProfileRoleChange } from "@/lib/profiles/applyRoleChange";
 
 const VALID_ROLES = ["CLIENT", "AGENT", "MANAGER", "ADMIN"] as const;
 type Role = (typeof VALID_ROLES)[number];
@@ -80,18 +81,42 @@ export async function POST(req: Request) {
     // profiles.role is no longer directly writable by an authenticated
     // user's own session (see supabase/migrations/20260831000000_harden_
     // profiles_write_privileges.sql) — even for the user's own row. The
-    // mutation has to go through the service-role client. Scope stays
-    // narrow: this is the only write it performs, using only the
-    // already-validated target_user_id/requested_role from the row above.
-    const { error: updProfileErr } = await adminSupabase()
-      .from("profiles")
-      .update({ role: request.requested_role })
-      .eq("id", request.target_user_id);
-
-    if (updProfileErr) {
+    // mutation now goes through applyProfileRoleChange() (Phase 2D), the
+    // same shared, trusted server-only helper a future direct Admin
+    // role-change endpoint will reuse — it centralizes the manager_id
+    // clearing / Manager-demotion-with-agents guard so this flow doesn't
+    // reimplement (or forget) those rules. Uses only the already-validated
+    // target_user_id/requested_role from the row above.
+    let result;
+    try {
+      result = await applyProfileRoleChange(request.target_user_id, request.requested_role);
+    } catch (err) {
+      console.error("[role-change-confirm] applyProfileRoleChange failed", err);
       return NextResponse.json(
-        { error: `Failed to update role: ${updProfileErr.message}` },
+        { error: "Failed to update role. Please try again." },
         { status: 500 }
+      );
+    }
+
+    if (result.status === "PROFILE_NOT_FOUND") {
+      return NextResponse.json({ error: "Target account not found." }, { status: 404 });
+    }
+
+    if (result.status === "MANAGER_HAS_AGENTS") {
+      // The target is currently a MANAGER with assigned Agents — approving
+      // this role change would leave those Agents pointing at a profile
+      // that's no longer a Manager, which is blocked, not auto-unassigned
+      // (Phase 2D Part F). Left PENDING (not marked APPROVED/REJECTED) so
+      // an Admin can reassign/unassign those Agents and the target user can
+      // retry approval afterward, rather than the request being silently
+      // closed out by a failure outside their control.
+      return NextResponse.json(
+        {
+          error: `This account still manages ${result.blockedAgentCount} agent${
+            result.blockedAgentCount === 1 ? "" : "s"
+          }. An admin must reassign or unassign them before this role change can be approved.`,
+        },
+        { status: 409 }
       );
     }
 
