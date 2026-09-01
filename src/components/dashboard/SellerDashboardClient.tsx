@@ -16,6 +16,7 @@ import {
   BarChart3,
   RefreshCw,
   Search,
+  Users2,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -130,6 +131,7 @@ export default function SellerDashboardClient({
           </div>
 
           <div className="space-y-4">
+            {role === "MANAGER" && <MyAgentsSummarySection />}
             <NeedsAttentionSection
               state={state}
               available={summary?.attention.available ?? true}
@@ -158,6 +160,59 @@ function SectionCard({ title, children, action }: { title: string; children: Rea
       </div>
       {children}
     </Card>
+  );
+}
+
+// Manager-only (Part I). Reuses GET /api/manager/agents purely for its
+// count — no separate endpoint, no fabricated sales/lead/performance
+// numbers. Fails silently (renders nothing) rather than showing an error
+// card for what's a small supplementary widget, not the dashboard's
+// primary content.
+function MyAgentsSummarySection() {
+  const [count, setCount] = useState<number | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch("/api/manager/agents", { cache: "no-store" });
+        if (!res.ok) throw new Error("failed");
+        const data = await res.json();
+        if (!cancelled) setCount(Array.isArray(data.agents) ? data.agents.length : 0);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (failed) return null;
+
+  return (
+    <SectionCard title="My Agents">
+      {count === null ? (
+        <div className="h-10 animate-pulse rounded-lg bg-muted" role="status" aria-label="Loading agent count" />
+      ) : (
+        <>
+          <div className="flex items-center gap-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[color:var(--primary)]/10 text-[color:var(--primary)]">
+              <Users2 className="h-4 w-4" />
+            </div>
+            <p className="text-sm text-slate-700">
+              <span className="font-semibold text-slate-900">{count}</span> agent{count === 1 ? "" : "s"} assigned
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm" className="mt-3 w-full">
+            <Link href="/dashboard/agents">View Agents</Link>
+          </Button>
+        </>
+      )}
+    </SectionCard>
   );
 }
 

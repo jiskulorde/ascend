@@ -2,7 +2,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Shield, UserCircle2, Loader2 } from "lucide-react";
+import { Shield, UserCircle2, Loader2, Users2 } from "lucide-react";
+import ManagerAssignDialog, { type ManagerOption } from "@/components/dashboard/ManagerAssignDialog";
 
 type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN" | null;
 
@@ -11,11 +12,13 @@ type ProfileRow = {
   full_name: string | null;
   email?: string | null;
   role: Role;
+  manager_id?: string | null;
 };
 
 type Props = {
   admin: ProfileRow;
   initialUsers: ProfileRow[];
+  managerOptions: ManagerOption[];
 };
 
 const ALL_ROLES: Exclude<Role, null>[] = [
@@ -25,11 +28,12 @@ const ALL_ROLES: Exclude<Role, null>[] = [
   "ADMIN",
 ];
 
-export default function UsersAdminClient({ admin, initialUsers }: Props) {
+export default function UsersAdminClient({ admin, initialUsers, managerOptions }: Props) {
   const [rows, setRows] = useState(initialUsers);
   const [pending, setPending] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [managerDialogAgent, setManagerDialogAgent] = useState<ProfileRow | null>(null);
   const [draftRole, setDraftRole] = useState<Record<string, Exclude<Role, null>>>(
     () =>
       initialUsers.reduce(
@@ -52,6 +56,12 @@ export default function UsersAdminClient({ admin, initialUsers }: Props) {
     }
     return base;
   }, [rows]);
+
+  const managerNameById = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const m of managerOptions) map.set(m.id, m.full_name);
+    return map;
+  }, [managerOptions]);
 
   const roleBadge = (role: Role) => {
     const safe = (role || "CLIENT") as Exclude<Role, null>;
@@ -122,6 +132,76 @@ export default function UsersAdminClient({ admin, initialUsers }: Props) {
     }
   };
 
+  const handleManagerSaved = (agentId: string, newManagerId: string | null) => {
+    setRows((prev) => prev.map((r) => (r.id === agentId ? { ...r, manager_id: newManagerId } : r)));
+    setError(null);
+    setMessage(
+      newManagerId
+        ? `Manager updated: ${managerNameById.get(newManagerId) || "assigned"}.`
+        : "Manager unassigned."
+    );
+  };
+
+  const managerCell = (u: ProfileRow) => {
+    if (u.role !== "AGENT") {
+      return <span className="text-slate-300">—</span>;
+    }
+
+    const currentManagerName = u.manager_id ? managerNameById.get(u.manager_id) ?? "Unknown manager" : null;
+
+    return (
+      <div className="flex flex-col gap-1">
+        <span className={currentManagerName ? "text-slate-800" : "text-slate-400"}>
+          {currentManagerName || "Unassigned"}
+        </span>
+        <button
+          type="button"
+          onClick={() => setManagerDialogAgent(u)}
+          className="w-fit rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+        >
+          {currentManagerName ? "Change" : "Assign"}
+        </button>
+      </div>
+    );
+  };
+
+  const roleChangeControl = (u: ProfileRow) => (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <select
+        className="w-full rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs"
+        value={draftRole[u.id]}
+        onChange={(e) =>
+          setDraftRole((prev) => ({
+            ...prev,
+            [u.id]: e.target.value as Exclude<Role, null>,
+          }))
+        }
+        disabled={pending === u.id}
+      >
+        {ALL_ROLES.map((r) => (
+          <option key={r} value={r}>
+            {r}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={() => handleSendRequest(u.id)}
+        disabled={pending === u.id}
+        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+      >
+        {pending === u.id ? (
+          <>
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+            Sending…
+          </>
+        ) : (
+          "Send role change"
+        )}
+      </button>
+    </div>
+  );
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -131,7 +211,7 @@ export default function UsersAdminClient({ admin, initialUsers }: Props) {
             Users
           </h1>
           <p className="text-sm text-slate-600">
-            Manage accounts and roles for your Ascend • DMCI workspace.
+            Manage accounts, roles, and Manager assignments for your Ascend • DMCI workspace.
           </p>
         </div>
       </div>
@@ -153,8 +233,8 @@ export default function UsersAdminClient({ admin, initialUsers }: Props) {
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 {roleBadge(admin.role)}
                 <span className="text-[11px] text-slate-500">
-                  Admin accounts can view all users and change roles (with email
-                  confirmation).
+                  Admin accounts can view all users, change roles (with email
+                  confirmation), and assign Agent Managers.
                 </span>
               </div>
             </div>
@@ -206,8 +286,8 @@ export default function UsersAdminClient({ admin, initialUsers }: Props) {
         </p>
       )}
 
-      {/* Users table */}
-      <section className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+      {/* Desktop table (md+) */}
+      <section className="hidden overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm md:block">
         <table className="min-w-full text-sm">
           <thead className="border-b bg-slate-900 text-white">
             <tr>
@@ -219,6 +299,9 @@ export default function UsersAdminClient({ admin, initialUsers }: Props) {
               </th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">
                 Role
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">
+                Manager
               </th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">
                 Change role
@@ -258,49 +341,15 @@ export default function UsersAdminClient({ admin, initialUsers }: Props) {
                   )}
                 </td>
                 <td className="px-4 py-3 align-top">{roleBadge(u.role)}</td>
-                <td className="px-4 py-3 align-top">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <select
-                      className="w-full rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs"
-                      value={draftRole[u.id]}
-                      onChange={(e) =>
-                        setDraftRole((prev) => ({
-                          ...prev,
-                          [u.id]: e.target.value as Exclude<Role, null>,
-                        }))
-                      }
-                      disabled={pending === u.id}
-                    >
-                      {ALL_ROLES.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => handleSendRequest(u.id)}
-                      disabled={pending === u.id}
-                      className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                    >
-                      {pending === u.id ? (
-                        <>
-                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          Sending…
-                        </>
-                      ) : (
-                        "Send role change"
-                      )}
-                    </button>
-                  </div>
-                </td>
+                <td className="px-4 py-3 align-top text-xs">{managerCell(u)}</td>
+                <td className="px-4 py-3 align-top">{roleChangeControl(u)}</td>
               </tr>
             ))}
 
             {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="px-4 py-6 text-center text-sm text-slate-500"
                 >
                   No other users yet. New sign-ups will appear here.
@@ -310,6 +359,87 @@ export default function UsersAdminClient({ admin, initialUsers }: Props) {
           </tbody>
         </table>
       </section>
+
+      {/* Mobile cards (below md) — the desktop table doesn't just shrink;
+          each account gets its own compact card with the same actions. */}
+      <section className="space-y-3 md:hidden">
+        {rows.length === 0 && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 text-center text-sm text-slate-500 shadow-sm">
+            No other users yet. New sign-ups will appear here.
+          </div>
+        )}
+
+        {rows.map((u) => (
+          <div key={u.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                  <UserCircle2 size={18} />
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-slate-900">{u.full_name || "—"}</div>
+                  <div className="truncate text-[11px] text-slate-400">
+                    {u.email === undefined
+                      ? "Account data mismatch"
+                      : u.email || "No email"}
+                  </div>
+                </div>
+              </div>
+              {roleBadge(u.role)}
+            </div>
+
+            {u.role === "AGENT" && (
+              <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                <div className="text-xs">
+                  <span className="text-slate-500">Manager: </span>
+                  <span className={u.manager_id ? "text-slate-800" : "text-slate-400"}>
+                    {u.manager_id ? managerNameById.get(u.manager_id) ?? "Unknown manager" : "Unassigned"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setManagerDialogAgent(u)}
+                  className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {u.manager_id ? "Change" : "Assign"}
+                </button>
+              </div>
+            )}
+
+            <div className="mt-3 border-t border-slate-100 pt-3">
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                Change role
+              </p>
+              {roleChangeControl(u)}
+            </div>
+          </div>
+        ))}
+      </section>
+
+      {managerDialogAgent && (
+        <ManagerAssignDialog
+          open={!!managerDialogAgent}
+          onOpenChange={(open) => {
+            if (!open) setManagerDialogAgent(null);
+          }}
+          agent={{ id: managerDialogAgent.id, full_name: managerDialogAgent.full_name }}
+          currentManagerId={managerDialogAgent.manager_id ?? null}
+          currentManagerName={
+            managerDialogAgent.manager_id
+              ? managerNameById.get(managerDialogAgent.manager_id) ?? "Unknown manager"
+              : null
+          }
+          managerOptions={managerOptions}
+          onSaved={handleManagerSaved}
+        />
+      )}
+
+      {managerOptions.length === 0 && stats.AGENT > 0 && (
+        <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
+          <Users2 size={12} />
+          No Manager accounts exist yet — promote a user to Manager before assigning Agents.
+        </p>
+      )}
     </div>
   );
 }

@@ -45,11 +45,7 @@ const PUBLIC_LINKS: NavLink[] = [
   { kind: "link", label: "About Us", href: "/about" },
 ];
 
-// AGENT/MANAGER: full seller toolset. MANAGER gets the identical nav for now
-// — a "My Agents"/"Agents" entry was scoped for this phase but there is no
-// real, non-placeholder route to point it at yet (dashboard/team is an
-// unscoped "every non-client account" list, not a per-manager roster), so it
-// is deliberately not added rather than shipping a fake link.
+// AGENT: full seller toolset.
 const SELLER_MORE_DROPDOWN: DropdownLink = {
   kind: "dropdown",
   id: "seller-more",
@@ -68,6 +64,19 @@ const SELLER_LINKS: NavLink[] = [
   { kind: "link", label: "Summary", href: "/summary" },
   { kind: "link", label: "Shortlists", href: "/shortlists" },
   { kind: "link", label: "Compare", href: "/compare" },
+  SELLER_MORE_DROPDOWN,
+];
+
+// MANAGER: everything AGENT gets, plus "Agents" — the real per-manager
+// roster at /dashboard/agents (Phase 2E), backed by GET /api/manager/agents.
+// Never shown to AGENT or CLIENT.
+const MANAGER_LINKS: NavLink[] = [
+  { kind: "link", label: "Dashboard", href: "/dashboard" },
+  { kind: "link", label: "Availability", href: "/availability" },
+  { kind: "link", label: "Summary", href: "/summary" },
+  { kind: "link", label: "Shortlists", href: "/shortlists" },
+  { kind: "link", label: "Compare", href: "/compare" },
+  { kind: "link", label: "Agents", href: "/dashboard/agents" },
   SELLER_MORE_DROPDOWN,
 ];
 
@@ -114,7 +123,8 @@ function getMainLinks(isSignedIn: boolean, role: Role): NavLink[] {
   if (!isSignedIn) return PUBLIC_LINKS;
 
   if (role === "ADMIN") return ADMIN_LINKS;
-  if (role === "AGENT" || role === "MANAGER") return SELLER_LINKS;
+  if (role === "MANAGER") return MANAGER_LINKS;
+  if (role === "AGENT") return SELLER_LINKS;
 
   // CLIENT (or a signed-in session with no recognized role yet) — same
   // public nav as an anonymous visitor, never the seller toolset.

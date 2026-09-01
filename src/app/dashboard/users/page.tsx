@@ -34,12 +34,28 @@ export default async function UsersAdminPage() {
   // Load all OTHER users (no email column here either)
   const { data: users, error: usersError } = await supabase
     .from("profiles")
-    .select("id, full_name, role")
+    .select("id, full_name, role, manager_id")
     .neq("id", me.id)
     .order("full_name", { ascending: true });
 
   if (usersError) {
     throw new Error(usersError.message);
+  }
+
+  // Manager options for the Agent -> Manager assignment control. Admin's own
+  // session already has full profiles SELECT via the existing
+  // profiles_select_all_admin RLS policy — no service-role read needed here,
+  // and no new RLS policy was added for this (Phase 2E stays within Phase
+  // 2C/2D's "no new Manager SELECT RLS" boundary; this is Admin's existing
+  // access, not a new grant).
+  const { data: managers, error: managersError } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .eq("role", "MANAGER")
+    .order("full_name", { ascending: true });
+
+  if (managersError) {
+    throw new Error(managersError.message);
   }
 
   // Only reachable after the ADMIN check above. Emails live in auth.users,
@@ -69,6 +85,7 @@ export default async function UsersAdminPage() {
         ...u,
         email: emailsById.has(u.id) ? emailsById.get(u.id) ?? null : undefined,
       }))}
+      managerOptions={managers ?? []}
     />
   );
 }
