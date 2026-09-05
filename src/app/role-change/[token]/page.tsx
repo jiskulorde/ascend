@@ -1,7 +1,7 @@
 // src/app/role-change/[token]/page.tsx
 
-import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
+import { requireActivePage } from "@/lib/auth/role";
 import RoleChangeClient from "@/components/RoleChangeClient";
 
 type PageProps = {
@@ -11,15 +11,15 @@ type PageProps = {
 export default async function RoleChangePage({ params }: PageProps) {
   const token = params.token;
 
-  const supabase = await serverSupabase();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  // A PENDING/SUSPENDED/DEACTIVATED/EXPIRED target — or one whose profile
+  // can't even be verified — must never see this confirmation UI at all
+  // (the API would reject it anyway; see requireActiveApiAccount in
+  // role-change-confirm/route.ts). requireActivePage() fails closed on a
+  // missing/unreadable profile (-> /account/status), never getCurrentUser()'s
+  // CLIENT/ACTIVE fallback, before the token is even looked up.
+  const currentUser = await requireActivePage(`/role-change/${token}`);
 
-  // Require login; you can improve auth/login later to respect ?next=
-  if (!session) {
-    redirect(`/auth/login?next=/role-change/${token}`);
-  }
+  const supabase = await serverSupabase();
 
   // Find the role-change request by token
   const { data: request, error } = await supabase
@@ -42,7 +42,7 @@ export default async function RoleChangePage({ params }: PageProps) {
   }
 
   // Only the target user can use this link (extra safety)
-  if (request.target_user_id !== session.user.id) {
+  if (request.target_user_id !== currentUser.id) {
     return (
       <main className="mx-auto max-w-lg p-6">
         <h1 className="text-2xl font-semibold tracking-tight">

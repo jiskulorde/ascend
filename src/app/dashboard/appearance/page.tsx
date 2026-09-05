@@ -7,13 +7,16 @@ import AppearanceClient from "@/components/dashboard/AppearanceClient";
 
 export default async function AppearancePage() {
   const supabase = await serverSupabase();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) redirect("/auth/login");
+  // getUser() re-verifies the session against Supabase Auth rather than
+  // trusting locally-stored session data, per Supabase's own guidance for
+  // server-side authorization decisions.
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/auth/login");
 
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
-    .eq("id", session.user.id)
+    .eq("id", user.id)
     .single();
 
   const role = profile?.role as "CLIENT" | "AGENT" | "MANAGER" | "ADMIN" | undefined;

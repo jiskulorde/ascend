@@ -6,6 +6,16 @@ import { useEffect, useMemo, useState } from "react";
 import Select from "react-select";
 import { Range } from "react-range";
 import Link from "next/link";
+import { Bookmark } from "lucide-react";
+import SaveToShortlistDialog from "@/components/shortlists/SaveToShortlistDialog";
+import type { SavableUnit } from "@/lib/shortlists/save";
+import {
+  fetchMembershipIndex,
+  mergeMembership,
+  removeMembership,
+  shortlistIdsFor,
+  type MembershipIndex,
+} from "@/lib/shortlists/membership";
 
 type UnitRow = {
   property_code: string;
@@ -125,6 +135,21 @@ function typeSort(a: string, b: string) {
   return a.localeCompare(b);
 }
 
+// UnitRow -> SavableUnit (src/lib/shortlists/save.ts) — the only field-name
+// mismatch is BuildingUnit -> building_unit.
+function toSavableUnits(list: UnitRow[]): SavableUnit[] {
+  return list.map((r) => ({
+    unit_id: r.unit_id,
+    property_code: r.property_code,
+    tower_code: r.tower_code,
+    building_unit: r.BuildingUnit,
+    ListPrice: r.ListPrice,
+    Status: r.Status,
+    Type: r.Type,
+    GrossAreaSQM: r.GrossAreaSQM,
+  }));
+}
+
 export default function AvailabilityClient() {
   const [rows, setRows] = useState<UnitRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -137,9 +162,12 @@ export default function AvailabilityClient() {
   const [selectedAmenities, setSelectedAmenities] = useState<Option[]>([]);
   const [selectedFacing, setSelectedFacing] = useState<Option[]>([]);
   const [selectedProperty, setSelectedProperty] = useState<Option[]>([]);
+  const [selectedTower, setSelectedTower] = useState<Option[]>([]);
   const [selectedCity, setSelectedCity] = useState<Option[]>([]);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 10_000_000]);
   const [sizeRange, setSizeRange] = useState<[number, number]>([0, 500]);
+  const [minSizeInput, setMinSizeInput] = useState<string>("0");
+  const [maxSizeInput, setMaxSizeInput] = useState<string>("500");
 
   const [sortOption, setSortOption] = useState<string>("priceAsc");
   const [currentPage, setCurrentPage] = useState(1);
@@ -147,6 +175,27 @@ export default function AvailabilityClient() {
 
   const [selectedUnits, setSelectedUnits] = useState<Set<string>>(new Set());
   const [showOnlySelected, setShowOnlySelected] = useState(false);
+
+  // Save-to-shortlist: `saveTarget` holds the row(s) the dialog is currently open
+  // for (single-unit Save, or the whole current selection for "Save selected").
+  //
+  // `membershipIndex` is the seller's REAL, database-backed shortlist
+  // membership (which physical units are already in which of their
+  // shortlists) — fetched from GET /api/shortlists/membership on mount, never
+  // inferred from session-only state, so "Saved (N)" stays correct across page
+  // refreshes and later visits. It's a NEUTRAL indicator only: a unit is never
+  // exclusive to one shortlist, so having memberships never disables the Save
+  // action for that unit — it stays fully clickable so the seller can save it
+  // into additional shortlists (e.g. the same unit offered to several
+  // different clients). Updated in place after a successful save (see
+  // SaveToShortlistDialog's onSaved below) so the count is correct immediately,
+  // without a refetch.
+  const [saveTarget, setSaveTarget] = useState<UnitRow[] | null>(null);
+  const [membershipIndex, setMembershipIndex] = useState<MembershipIndex | null>(null);
+
+  useEffect(() => {
+    fetchMembershipIndex().then(setMembershipIndex);
+  }, []);
 
   const [view, setView] = useState<"cards" | "table">("cards");
   const [gridCols, setGridCols] = useState<number>(3);
@@ -199,6 +248,39 @@ export default function AvailabilityClient() {
     localStorage.setItem("selectedUnits", JSON.stringify(Array.from(selectedUnits)));
   }, [selectedUnits]);
 
+  useEffect(() => {
+    setMinSizeInput(String(sizeRange[0]));
+    setMaxSizeInput(String(sizeRange[1]));
+  }, [sizeRange]);
+
+  const commitMinSize = () => {
+    const num = parseFloat(minSizeInput);
+    if (!Number.isFinite(num)) {
+      setMinSizeInput(String(sizeRange[0]));
+      return;
+    }
+    const clampedMin = Math.min(Math.max(num, minSqm), sizeRange[1]);
+    setSizeRange([clampedMin, sizeRange[1]]);
+    setCurrentPage(1);
+  };
+
+  const commitMaxSize = () => {
+    const num = parseFloat(maxSizeInput);
+    if (!Number.isFinite(num)) {
+      setMaxSizeInput(String(sizeRange[1]));
+      return;
+    }
+    const clampedMax = Math.max(Math.min(num, maxSqm), sizeRange[0]);
+    setSizeRange([sizeRange[0], clampedMax]);
+    setCurrentPage(1);
+  };
+
+  const handleSizeInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.currentTarget.blur();
+    }
+  };
+
   const searchMatches = (r: UnitRow) => {
     const q = searchTerm.trim().toLowerCase();
     if (!q) return true;
@@ -227,7 +309,7 @@ export default function AvailabilityClient() {
     return searchable.includes(q);
   };
 
-  const rowsAfter = (exclude: "property" | "city" | "status" | "type" | "amenities" | "facing") => {
+  const rowsAfter = (exclude: "property" | "tower" | "city" | "status" | "type" | "amenities" | "facing") => {
     return rows.filter((r) => {
       const priceOk = r.ListPrice >= priceRange[0] && r.ListPrice <= priceRange[1];
       const sqmOk = r.GrossAreaSQM >= sizeRange[0] && r.GrossAreaSQM <= sizeRange[1];
@@ -237,6 +319,11 @@ export default function AvailabilityClient() {
         exclude === "property" || selectedProperty.length === 0
           ? true
           : selectedProperty.some((pr) => pr.label === r.property_name);
+
+      const towerOk =
+        exclude === "tower" || selectedTower.length === 0
+          ? true
+          : selectedTower.some((t) => t.value === r.tower_name);
 
       const cityOk =
         exclude === "city" || selectedCity.length === 0
@@ -269,6 +356,7 @@ export default function AvailabilityClient() {
         sqmOk &&
         onlySelOk &&
         propertyOk &&
+        towerOk &&
         cityOk &&
         statusOk &&
         typeOk &&
@@ -284,38 +372,45 @@ export default function AvailabilityClient() {
     const vals = Array.from(new Set(rowsAfter("property").map((r) => r.property_name).filter(Boolean)));
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedCity, selectedStatus, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedTower, selectedCity, selectedStatus, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
+
+  const availableTowerOpts = useMemo(() => {
+    if (selectedProperty.length === 0) return [];
+    const vals = Array.from(new Set(rowsAfter("tower").map((r) => r.tower_name).filter(Boolean)));
+    return toOptions(vals);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedCity, selectedStatus, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
 
   const availableCityOpts = useMemo(() => {
     const vals = Array.from(new Set(rowsAfter("city").map((r) => r.city).filter(Boolean)));
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedStatus, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedTower, selectedStatus, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
 
   const availableStatusOpts = useMemo(() => {
     const vals = Array.from(new Set(rowsAfter("status").map((r) => r.Status).filter(Boolean)));
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedCity, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedTower, selectedCity, selectedType, selectedAmenities, selectedFacing, showOnlySelected]);
 
   const availableTypeOpts = useMemo(() => {
     const vals = Array.from(new Set(rowsAfter("type").map((r) => r.Type).filter(Boolean)));
     vals.sort(typeSort);
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedCity, selectedStatus, selectedAmenities, selectedFacing, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedTower, selectedCity, selectedStatus, selectedAmenities, selectedFacing, showOnlySelected]);
 
   const availableAmenityOpts = useMemo(() => {
     const vals = Array.from(new Set(rowsAfter("amenities").map((r) => r.Amenities).filter(Boolean)));
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedCity, selectedStatus, selectedType, selectedFacing, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedTower, selectedCity, selectedStatus, selectedType, selectedFacing, showOnlySelected]);
 
   const availableFacingOpts = useMemo(() => {
     const vals = Array.from(new Set(rowsAfter("facing").map((r) => r.Facing).filter(Boolean)));
     return toOptions(vals);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedCity, selectedStatus, selectedType, selectedAmenities, showOnlySelected]);
+  }, [rows, searchTerm, priceRange, sizeRange, selectedProperty, selectedTower, selectedCity, selectedStatus, selectedType, selectedAmenities, showOnlySelected]);
 
   useEffect(() => {
     const prune = (selected: Option[], avail: Option[], setter: (v: Option[]) => void) => {
@@ -325,6 +420,7 @@ export default function AvailabilityClient() {
     };
 
     prune(selectedProperty, availablePropertyOpts, setSelectedProperty);
+    prune(selectedTower, availableTowerOpts, setSelectedTower);
     prune(selectedCity, availableCityOpts, setSelectedCity);
     prune(selectedStatus, availableStatusOpts, setSelectedStatus);
     prune(selectedType, availableTypeOpts, setSelectedType);
@@ -332,12 +428,14 @@ export default function AvailabilityClient() {
     prune(selectedFacing, availableFacingOpts, setSelectedFacing);
   }, [
     availablePropertyOpts,
+    availableTowerOpts,
     availableCityOpts,
     availableStatusOpts,
     availableTypeOpts,
     availableAmenityOpts,
     availableFacingOpts,
     selectedProperty,
+    selectedTower,
     selectedCity,
     selectedStatus,
     selectedType,
@@ -352,6 +450,7 @@ export default function AvailabilityClient() {
       const amenMatch = selectedAmenities.length ? selectedAmenities.some((a) => a.value === r.Amenities) : true;
       const facingMatch = selectedFacing.length ? selectedFacing.some((f) => f.value === r.Facing) : true;
       const propertyMatch = selectedProperty.length ? selectedProperty.some((pr) => pr.label === r.property_name) : true;
+      const towerMatch = selectedTower.length ? selectedTower.some((t) => t.value === r.tower_name) : true;
       const cityMatch = selectedCity.length ? selectedCity.some((c) => c.label === r.city) : true;
       const priceMatch = r.ListPrice >= priceRange[0] && r.ListPrice <= priceRange[1];
       const sqmMatch = r.GrossAreaSQM >= sizeRange[0] && r.GrossAreaSQM <= sizeRange[1];
@@ -364,6 +463,7 @@ export default function AvailabilityClient() {
         amenMatch &&
         facingMatch &&
         propertyMatch &&
+        towerMatch &&
         cityMatch &&
         priceMatch &&
         sqmMatch &&
@@ -399,6 +499,7 @@ export default function AvailabilityClient() {
     selectedAmenities,
     selectedFacing,
     selectedProperty,
+    selectedTower,
     selectedCity,
     priceRange,
     sizeRange,
@@ -421,6 +522,7 @@ export default function AvailabilityClient() {
     count += selectedAmenities.length;
     count += selectedFacing.length;
     count += selectedProperty.length;
+    count += selectedTower.length;
     count += selectedCity.length;
 
     if (priceRange[0] !== 0 || priceRange[1] !== maxPrice) count += 1;
@@ -435,6 +537,7 @@ export default function AvailabilityClient() {
     selectedAmenities,
     selectedFacing,
     selectedProperty,
+    selectedTower,
     selectedCity,
     priceRange,
     sizeRange,
@@ -457,6 +560,7 @@ export default function AvailabilityClient() {
     setSelectedAmenities([]);
     setSelectedFacing([]);
     setSelectedProperty([]);
+    setSelectedTower([]);
     setSelectedCity([]);
     setPriceRange([0, maxPrice || 10_000_000]);
     setSizeRange([minSqm, maxSqm || 500]);
@@ -470,11 +574,12 @@ export default function AvailabilityClient() {
       minHeight: 38,
       borderRadius: 14,
       borderColor: state.isFocused ? "#1f3f93" : "#d8e0ec",
-      backgroundColor: "#ffffff",
+      backgroundColor: state.isDisabled ? "#f8fafc" : "#ffffff",
       boxShadow: state.isFocused ? "0 0 0 3px rgba(31,63,147,0.10)" : "0 1px 2px rgba(15,23,42,0.04)",
-      cursor: "pointer",
+      cursor: state.isDisabled ? "not-allowed" : "pointer",
+      opacity: state.isDisabled ? 0.7 : 1,
       transition: "all 150ms ease",
-      "&:hover": { borderColor: "#b7c4d8" },
+      "&:hover": { borderColor: state.isDisabled ? "#d8e0ec" : "#b7c4d8" },
     }),
     valueContainer: (p: any) => ({
       ...p,
@@ -603,6 +708,21 @@ export default function AvailabilityClient() {
 
           <Select
             isMulti
+            instanceId={`avail-tower-${ctx}`}
+            options={availableTowerOpts}
+            value={selectedTower}
+            onChange={(v) => {
+              setSelectedTower(Array.from(v as readonly Option[]));
+              setCurrentPage(1);
+            }}
+            placeholder={selectedProperty.length === 0 ? "Select project first" : "Tower"}
+            isDisabled={selectedProperty.length === 0}
+            styles={selectStyles}
+            menuPortalTarget={typeof window !== "undefined" ? document.body : undefined}
+          />
+
+          <Select
+            isMulti
             instanceId={`avail-city-${ctx}`}
             options={availableCityOpts}
             value={selectedCity}
@@ -707,10 +827,48 @@ export default function AvailabilityClient() {
             />
           </RangeBox>
 
-          <RangeBox label="Size" value={`${sizeRange[0]} – ${sizeRange[1]} sqm`}>
+          <RangeBox label="Size (sqm)" value={`${sizeRange[0]} – ${sizeRange[1]} sqm`}>
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Min
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min={minSqm}
+                  max={maxSqm}
+                  value={minSizeInput}
+                  onChange={(e) => setMinSizeInput(e.target.value)}
+                  onBlur={commitMinSize}
+                  onKeyDown={handleSizeInputKeyDown}
+                  className="h-9 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-[#1f3f93] focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  Max
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min={minSqm}
+                  max={maxSqm}
+                  value={maxSizeInput}
+                  onChange={(e) => setMaxSizeInput(e.target.value)}
+                  onBlur={commitMaxSize}
+                  onKeyDown={handleSizeInputKeyDown}
+                  className="h-9 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-900 outline-none transition focus:border-[#1f3f93] focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+            </div>
+
             {maxSqm > minSqm ? (
               <Range
-                step={1}
+                step={0.1}
                 min={minSqm}
                 max={maxSqm || 500}
                 values={sizeRange}
@@ -791,6 +949,17 @@ export default function AvailabilityClient() {
             <b className="text-slate-950">{selectedUnits.size}</b> unit{selectedUnits.size !== 1 ? "s" : ""} selected
           </div>
 
+          {selectedUnits.size >= 1 && (
+            <button
+              type="button"
+              onClick={() => setSaveTarget(rows.filter((r) => selectedUnits.has(r.unit_id)))}
+              className="mt-2 flex h-10 w-full items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+            >
+              <Bookmark className="h-4 w-4" />
+              Save selected
+            </button>
+          )}
+
           {selectedUnits.size > 1 && (
             <Link
               href="/compare"
@@ -817,6 +986,80 @@ export default function AvailabilityClient() {
           Done
         </button>
       </div>
+    );
+  }
+
+  // Shared Save-to-shortlist trigger for card view, the mobile compact table row,
+  // and the desktop table's Action column — kept as one component (closing over
+  // membershipIndex/setSaveTarget) so the "how many shortlists is this in /
+  // open the dialog for this one row" logic isn't duplicated four times across
+  // the different render paths.
+  function SaveTrigger({
+    r,
+    variant,
+    heightClass = "h-10",
+  }: {
+    r: UnitRow;
+    variant: "card" | "mobileRow" | "tableCell";
+    heightClass?: string;
+  }) {
+    // Persisted membership count, not a lock: a unit can live in many different
+    // clients' shortlists at once, so a nonzero count never disables the
+    // button — it always reopens the same dialog so the seller can add it to
+    // more shortlists. `count === null` means membership hasn't loaded yet
+    // (neutral "Save", no number implied); `count === 0` means it's loaded and
+    // confirmed the unit isn't saved anywhere yet.
+    const count = membershipIndex
+      ? shortlistIdsFor(membershipIndex, {
+          property_code: r.property_code,
+          tower_code: r.tower_code,
+          building_unit: r.BuildingUnit,
+        }).size
+      : null;
+    const isSaved = !!count && count > 0;
+    const label = isSaved ? `Saved (${count})` : "Save";
+    const savedTitle = `Saved to ${count} shortlist${count === 1 ? "" : "s"} — click to add to another`;
+
+    if (variant === "mobileRow") {
+      return (
+        <button
+          type="button"
+          onClick={() => setSaveTarget([r])}
+          title={isSaved ? savedTitle : "Save to shortlist"}
+          className={`flex items-center justify-center ${isSaved ? "text-emerald-600" : "text-slate-400 hover:text-[#1f3f93]"}`}
+        >
+          <Bookmark className="h-3.5 w-3.5" fill={isSaved ? "currentColor" : "none"} />
+        </button>
+      );
+    }
+
+    if (variant === "tableCell") {
+      return (
+        <button
+          type="button"
+          onClick={() => setSaveTarget([r])}
+          title={isSaved ? savedTitle : "Save to a Client Shortlist"}
+          className={`font-bold ${isSaved ? "text-emerald-700" : "text-[#1f3f93] hover:text-[#132b66]"}`}
+        >
+          {label}
+        </button>
+      );
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={() => setSaveTarget([r])}
+        title={isSaved ? savedTitle : "Save to a Client Shortlist"}
+        className={`flex ${heightClass} shrink-0 items-center justify-center gap-1.5 rounded-2xl border px-3 text-[13px] font-semibold shadow-sm transition ${
+          isSaved
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+        }`}
+      >
+        <Bookmark className="h-4 w-4" fill={isSaved ? "currentColor" : "none"} />
+        {label}
+      </button>
     );
   }
 
@@ -889,12 +1132,15 @@ export default function AvailabilityClient() {
             </div>
           </div>
 
-          <Link
-            href={`/computation/${encodeURIComponent(r.unit_id)}`}
-            className="mt-3 flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-[13px] font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
-          >
-            Open computation
-          </Link>
+          <div className="mt-3 flex gap-2">
+            <SaveTrigger r={r} variant="card" />
+            <Link
+              href={`/computation/${encodeURIComponent(r.unit_id)}`}
+              className="flex h-10 flex-1 items-center justify-center rounded-2xl border border-slate-200 bg-white text-[13px] font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+            >
+              Open computation
+            </Link>
+          </div>
         </div>
       </article>
     );
@@ -906,7 +1152,7 @@ export default function AvailabilityClient() {
 
     return (
       <div
-        className={`grid grid-cols-[1.25fr_.7fr_.9fr_.78fr_20px] gap-1 border-b border-slate-100 px-2 py-1.5 ${
+        className={`grid grid-cols-[1.25fr_.7fr_.9fr_.78fr_46px] gap-1 border-b border-slate-100 px-2 py-1.5 ${
           isSelected ? "bg-blue-50/60" : "bg-white"
         }`}
       >
@@ -935,13 +1181,16 @@ export default function AvailabilityClient() {
           <div className="truncate text-[8px] text-slate-500">{r.Facing || "—"}</div>
         </div>
 
-        <Link
-          href={`/computation/${encodeURIComponent(r.unit_id)}`}
-          className="flex items-center justify-end text-sm font-bold text-[#1f3f93]"
-          title="Compute"
-        >
-          +
-        </Link>
+        <div className="flex items-center justify-end gap-1.5">
+          <SaveTrigger r={r} variant="mobileRow" />
+          <Link
+            href={`/computation/${encodeURIComponent(r.unit_id)}`}
+            className="flex items-center justify-end text-sm font-bold text-[#1f3f93]"
+            title="Compute"
+          >
+            +
+          </Link>
+        </div>
       </div>
     );
   }
@@ -1025,12 +1274,15 @@ export default function AvailabilityClient() {
             </div>
           </div>
 
-          <Link
-            href={`/computation/${encodeURIComponent(r.unit_id)}`}
-            className="mt-4 flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
-          >
-            Open computation
-          </Link>
+          <div className="mt-4 flex gap-2">
+            <SaveTrigger r={r} variant="card" heightClass="h-11" />
+            <Link
+              href={`/computation/${encodeURIComponent(r.unit_id)}`}
+              className="flex h-11 flex-1 items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50"
+            >
+              Open computation
+            </Link>
+          </div>
         </div>
       </article>
     );
@@ -1186,12 +1438,12 @@ export default function AvailabilityClient() {
               ) : (
                 <>
                   <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:hidden">
-                    <div className="grid grid-cols-[1fr_.62fr_.84fr_.75fr_20px] gap-1 bg-[#1f3f93] px-2 py-2 text-[8px] font-bold uppercase tracking-wide text-white">
+                    <div className="grid grid-cols-[1fr_.62fr_.84fr_.75fr_46px] gap-1 bg-[#1f3f93] px-2 py-2 text-[8px] font-bold uppercase tracking-wide text-white">
                       <span>Unit</span>
                       <span>Type</span>
                       <span className="text-right">Price</span>
                       <span className="text-right">₱/sqm</span>
-                      <span className="text-right">+</span>
+                      <span className="text-right">Actions</span>
                     </div>
 
                     {pageItems.map((r) => (
@@ -1208,11 +1460,11 @@ export default function AvailabilityClient() {
                           <th className="w-[19%] px-3 py-3 text-left">Project • Tower</th>
                           <th className="w-[8%] px-3 py-3 text-left">Type</th>
                           <th className="w-[8%] px-3 py-3 text-right">Area</th>
-                          <th className="w-[9%] px-3 py-3 text-left">Facing</th>
-                          <th className="w-[9%] px-3 py-3 text-left">Status</th>
+                          <th className="w-[8%] px-3 py-3 text-left">Facing</th>
+                          <th className="w-[8%] px-3 py-3 text-left">Status</th>
                           <th className="w-[12%] px-3 py-3 text-right">List Price</th>
-                          <th className="w-[10%] px-3 py-3 text-right">₱/sqm</th>
-                          <th className="w-[8%] px-3 py-3 text-right">Action</th>
+                          <th className="w-[9%] px-3 py-3 text-right">₱/sqm</th>
+                          <th className="w-[11%] px-3 py-3 text-right">Action</th>
                         </tr>
                       </thead>
 
@@ -1245,12 +1497,16 @@ export default function AvailabilityClient() {
                               <td className="px-3 py-3 text-right font-bold">{fmtPhp(r.ListPrice)}</td>
                               <td className="px-3 py-3 text-right font-bold text-emerald-700">{fmtPhp(r.PerSQM)}</td>
                               <td className="px-3 py-3 text-right">
-                                <Link
-                                  href={`/computation/${encodeURIComponent(r.unit_id)}`}
-                                  className="font-bold text-[#1f3f93] hover:text-[#132b66]"
-                                >
-                                  Compute
-                                </Link>
+                                <div className="flex items-center justify-end gap-1.5 whitespace-nowrap text-xs">
+                                  <SaveTrigger r={r} variant="tableCell" />
+                                  <span className="text-slate-300">|</span>
+                                  <Link
+                                    href={`/computation/${encodeURIComponent(r.unit_id)}`}
+                                    className="font-bold text-[#1f3f93] hover:text-[#132b66]"
+                                  >
+                                    Compute
+                                  </Link>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -1308,6 +1564,19 @@ export default function AvailabilityClient() {
           </div>
         </div>
       )}
+
+      <SaveToShortlistDialog
+        open={!!saveTarget}
+        onOpenChange={(open) => !open && setSaveTarget(null)}
+        units={saveTarget ? toSavableUnits(saveTarget) : []}
+        onSaved={({ memberships, removedMemberships }) => {
+          setMembershipIndex((prev) => {
+            let next = mergeMembership(prev, memberships);
+            if (removedMemberships?.length) next = removeMembership(next, removedMemberships);
+            return next;
+          });
+        }}
+      />
     </main>
   );
 }

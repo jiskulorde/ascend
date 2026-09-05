@@ -5,17 +5,12 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { browserSupabase } from "@/lib/supabase/client";
-
-function safeNextPath(value: string | null) {
-  if (!value) return "/dashboard";
-  if (!value.startsWith("/") || value.startsWith("//")) return "/dashboard";
-  return value;
-}
+import { parseExplicitNext, resolvePostLoginDestination } from "@/lib/auth/postLoginDestination";
 
 function RedirectHandler() {
   const searchParams = useSearchParams();
   const code = searchParams.get("code");
-  const next = useMemo(() => safeNextPath(searchParams.get("next")), [searchParams]);
+  const explicitNext = useMemo(() => parseExplicitNext(searchParams.get("next")), [searchParams]);
   const [message, setMessage] = useState("Completing sign in…");
 
   useEffect(() => {
@@ -33,7 +28,21 @@ function RedirectHandler() {
         await new Promise((resolve) => setTimeout(resolve, 150));
 
         if (!active) return;
-        window.location.replace(next);
+
+        // No explicit ?next= carried through from the login page: resolve a
+        // role-aware default now that the OAuth round trip is done and the
+        // signed-in user is known (sellers -> Dashboard, everyone else,
+        // including CLIENT -> Home). An explicit next is always honored as-is.
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        const destination = user
+          ? await resolvePostLoginDestination(supabase, user.id, explicitNext)
+          : explicitNext ?? "/";
+
+        if (!active) return;
+        window.location.replace(destination);
       } catch (error: any) {
         console.error("OAuth redirect error:", error?.message || error);
         if (active) setMessage(error?.message || "Sign in failed. Please try again.");
@@ -45,7 +54,7 @@ function RedirectHandler() {
     return () => {
       active = false;
     };
-  }, [code, next]);
+  }, [code, explicitNext]);
 
   return <p className="mt-10 text-center text-sm text-muted-foreground">{message}</p>;
 }

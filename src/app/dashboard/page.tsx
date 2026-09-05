@@ -1,66 +1,57 @@
 // src/app/dashboard/page.tsx
 
+import { redirect } from "next/navigation";
 import { serverSupabase } from "@/lib/supabase/server";
+import SellerDashboardClient from "@/components/dashboard/SellerDashboardClient";
+import { isSellerRole, type Role } from "@/lib/auth/role";
+import { computeEffectiveState, lifecycleDestination, type AccountStatus } from "@/lib/auth/accountLifecycle";
+
+export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const supabase = await serverSupabase();
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  // This should always exist because layout already guards, but just in case:
-  if (!session) {
-    return null;
+  // The layout above already guards this; re-checked here since a server
+  // component shouldn't assume a parent layout ran first on every render path.
+  if (!user) {
+    redirect("/auth/login?next=/dashboard");
   }
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, role")
-    .eq("id", session.user.id)
-    .single();
+    .select("full_name, role, account_status, access_expires_at")
+    .eq("id", user.id)
+    .maybeSingle();
 
-  const role = (profile?.role || "CLIENT") as
-    | "CLIENT"
-    | "AGENT"
-    | "MANAGER"
-    | "ADMIN";
+  // Fail closed: a missing/unreadable profile is never treated as
+  // CLIENT/ACTIVE (mirrors middleware.ts and requireActivePageAccount()).
+  if (!profile) {
+    redirect("/account/status");
+  }
 
-  return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">
-        {role === "ADMIN"
-          ? "Admin overview"
-          : role === "MANAGER"
-          ? "Manager overview"
-          : role === "AGENT"
-          ? "My sales dashboard"
-          : "My dashboard"}
-      </h1>
+  const role = profile.role as Role;
+  const accountStatus = profile.account_status as AccountStatus;
+  const accessExpiresAt = (profile.access_expires_at as string | null) ?? null;
 
-      <p className="text-sm text-slate-600">
-        Welcome {profile?.full_name || session.user.email}.
-      </p>
+  // Lifecycle BEFORE role. This page previously only checked role — a
+  // PENDING account's role stays CLIENT (Phase 3B), so the role-only check
+  // below sent it to Home via isSellerRole(), never to /account/pending.
+  // middleware.ts already enforces lifecycle correctly for /dashboard/*, but
+  // this page must not rely on that alone as its only line of defense.
+  const lifecycleRedirect = lifecycleDestination(computeEffectiveState(accountStatus, accessExpiresAt));
+  if (lifecycleRedirect) {
+    redirect(lifecycleRedirect);
+  }
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold mb-1">Quick actions</h2>
-          <p className="text-xs text-slate-500">
-            Jump to CRM, ads schedule, or availability.
-          </p>
-        </div>
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold mb-1">Today</h2>
-          <p className="text-xs text-slate-500">
-            Later we can show follow-ups due today and ad duty here.
-          </p>
-        </div>
-        <div className="rounded-2xl border bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold mb-1">Status</h2>
-          <p className="text-xs text-slate-500">
-            Manager/admin views can show lead counts & campaign stats.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+  if (!isSellerRole(role)) {
+    redirect("/");
+  }
+
+  const fullName = profile.full_name ?? null;
+  const email = user.email ?? null;
+
+  return <SellerDashboardClient fullName={fullName} email={email} role={role} />;
 }
