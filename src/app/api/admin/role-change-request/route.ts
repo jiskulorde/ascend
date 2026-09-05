@@ -2,12 +2,12 @@
 
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { serverSupabase } from "@/lib/supabase/server";
+import { actionSupabase } from "@/lib/supabase/server";
 import { adminSupabase } from "@/lib/supabase/admin";
+import { requireApiRole } from "@/lib/auth/role";
 import { sendRoleChangeEmail } from "@/lib/email/mailer";
 
 const ALLOWED_ROLES = ["CLIENT", "AGENT", "MANAGER", "ADMIN"] as const;
-type Role = (typeof ALLOWED_ROLES)[number];
 
 export async function POST(req: Request) {
   const { userId, newRole } = await req.json();
@@ -19,28 +19,21 @@ export async function POST(req: Request) {
     );
   }
 
-  const supabase = await serverSupabase();
+  const supabase = await actionSupabase();
+
+  // Requires an effectively ACTIVE ADMIN (Phase 3B) — previously an inline
+  // role-only check, which meant a PENDING/SUSPENDED/DEACTIVATED/EXPIRED
+  // Admin account could still issue role-change requests.
+  const authz = await requireApiRole(supabase, ["ADMIN"]);
+  if (!authz.ok) return authz.response;
+
+  const me = { id: authz.userId };
+
+  // requireApiRole() doesn't return email, only role — a cheap second call
+  // for the "requested by" line in the notification email below.
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
-    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-  }
-
-  // Check caller is ADMIN (using profiles table via anon client)
-  const { data: me, error: meError } = await supabase
-    .from("profiles")
-    .select("id, role")
-    .eq("id", session.user.id)
-    .single();
-
-  if (meError || !me || me.role !== "ADMIN") {
-    return NextResponse.json(
-      { error: "Only admins can request role changes." },
-      { status: 403 }
-    );
-  }
+    data: { user: callerUser },
+  } = await supabase.auth.getUser();
 
   // Use admin client to get the target user's email from auth.users
   const adminClient = adminSupabase();
@@ -96,7 +89,7 @@ export async function POST(req: Request) {
       newRole,
       confirmUrl,
       targetName,
-      requestedByEmail: session.user.email ?? null,
+      requestedByEmail: callerUser?.email ?? null,
     });
   } catch (mailError: any) {
     console.error("[role-change-request] email error", mailError);

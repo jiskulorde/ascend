@@ -3,14 +3,17 @@ import { serverSupabase } from "@/lib/supabase/server";
 
 export default async function AgentHome() {
   const supabase = await serverSupabase();
-  const { data: { session } } = await supabase.auth.getSession();
+  // getUser() re-verifies the session against Supabase Auth rather than
+  // trusting locally-stored session data, per Supabase's own guidance for
+  // server-side authorization decisions.
+  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!session) redirect("/auth/login?next=/agent");
+  if (!user) redirect("/auth/login?next=/agent");
 
   const { data: profile } = await supabase
     .from("profiles")
     .select("role")
-    .eq("id", session.user.id)
+    .eq("id", user.id)
     .single();
 
   const allowed = profile?.role === "AGENT" || profile?.role === "MANAGER";

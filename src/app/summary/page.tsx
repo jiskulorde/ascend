@@ -1,35 +1,22 @@
 // src/app/summary/page.tsx
 
 import { redirect } from "next/navigation";
-import { serverSupabase } from "@/lib/supabase/server";
-import { SELLER_ROLES, type Role } from "@/lib/auth/role";
+import { requireActivePage, SELLER_ROLES } from "@/lib/auth/role";
 import SummaryClient from "@/components/summary/SummaryClient";
 
 export const dynamic = "force-dynamic";
 
 // Summary is a seller tool (AGENT/MANAGER/ADMIN) — CLIENT is a buyer account
-// and is sent Home, not /403 (Phase 1 access matrix); anonymous still hits
-// the login redirect below (no session at all).
+// and is sent Home, not /403 (Phase 1 access matrix). requireActivePage()
+// handles authentication AND fails closed on PENDING/SUSPENDED/DEACTIVATED/
+// EXPIRED/unverifiable accounts BEFORE this role check ever runs —
+// previously this page only checked role, which let a PENDING account
+// (role stays CLIENT) fall through to the seller-role check below and land
+// on Home instead of /account/pending.
 export default async function SummaryPage() {
-  const supabase = await serverSupabase();
+  const currentUser = await requireActivePage("/summary");
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/auth/login?next=/summary");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const role = (profile?.role || "CLIENT") as Role;
-
-  if (!SELLER_ROLES.includes(role)) {
+  if (!SELLER_ROLES.includes(currentUser.role)) {
     redirect("/");
   }
 

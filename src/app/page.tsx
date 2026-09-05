@@ -12,17 +12,20 @@ export default async function HomePage() {
   const previewMode = cookieStore.get("preview_mode")?.value || "client";
   const showAll = previewMode === "staff";
 
-  // who is viewing?
+  // who is viewing? getUser() re-verifies the session against Supabase Auth
+  // rather than trusting locally-stored session data, per Supabase's own
+  // guidance for server-side authorization decisions (this gates the
+  // homepage-widget edit affordance below).
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
   let role: "CLIENT" | "AGENT" | "MANAGER" | "ADMIN" | undefined;
-  if (session) {
+  if (user) {
     const { data: profile } = await supabase
       .from("profiles")
       .select("role")
-      .eq("id", session.user.id)
+      .eq("id", user.id)
       .single();
     role = profile?.role as any;
   }

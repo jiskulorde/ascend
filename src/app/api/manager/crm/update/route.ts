@@ -1,29 +1,21 @@
 // src/app/api/manager/crm/update/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { serverSupabase } from "@/lib/supabase/server";
+import { actionSupabase } from "@/lib/supabase/server";
+import { requireApiRole } from "@/lib/auth/role";
 import { updateCrmLeadRow, CrmUpdatePayload } from "@/lib/google/crm";
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await serverSupabase();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const supabase = await actionSupabase();
 
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", session.user.id)
-      .single();
-
-    const role = profile?.role as string | undefined;
-    if (role !== "MANAGER" && role !== "ADMIN") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    // Lifecycle-aware, fail-closed authorization (same allowed roles as
+    // before: MANAGER or ADMIN) — a PENDING/SUSPENDED/DEACTIVATED/EXPIRED
+    // account, or one whose profile can't be verified at all, is rejected
+    // before the role check ever runs. Replaces the previous inline
+    // getSession() + profiles.select("role") check, which had no lifecycle
+    // awareness. No other behavior in this route changed.
+    const authz = await requireApiRole(supabase, ["MANAGER", "ADMIN"]);
+    if (!authz.ok) return authz.response;
 
     const body = await req.json();
     const { rowIndex, updates } = body as {

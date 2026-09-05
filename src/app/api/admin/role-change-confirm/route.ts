@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import { serverSupabase } from "@/lib/supabase/server";
 import { adminSupabase } from "@/lib/supabase/admin";
+import { requireActiveApiAccount } from "@/lib/auth/role";
 import { applyProfileRoleChange } from "@/lib/profiles/applyRoleChange";
 
 const VALID_ROLES = ["CLIENT", "AGENT", "MANAGER", "ADMIN"] as const;
@@ -26,13 +27,15 @@ export async function POST(req: Request) {
   }
 
   const supabase = await serverSupabase();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
 
-  if (!session) {
-    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-  }
+  // A PENDING/SUSPENDED/DEACTIVATED/EXPIRED target must not be able to
+  // confirm or reject a role-change request about themselves, even though
+  // this is otherwise a self-service action with no role requirement —
+  // requireApiRole doesn't fit here (it always ends in a role check), so
+  // this uses the narrower, fail-closed requireActiveApiAccount instead.
+  // Blocks BOTH decisions (APPROVE and REJECT) uniformly.
+  const authz = await requireActiveApiAccount(supabase);
+  if (!authz.ok) return authz.response;
 
   // Get the request by token
   const { data: request, error } = await supabase
@@ -56,7 +59,7 @@ export async function POST(req: Request) {
   }
 
   // Only the target user can confirm / reject
-  if (request.target_user_id !== session.user.id) {
+  if (request.target_user_id !== authz.userId) {
     return NextResponse.json(
       { error: "You are not allowed to act on this request." },
       { status: 403 }

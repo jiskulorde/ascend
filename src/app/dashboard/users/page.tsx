@@ -8,11 +8,14 @@ import UsersAdminClient from "@/components/dashboard/UsersAdminClient";
 export default async function UsersAdminPage() {
   const supabase = await serverSupabase();
 
+  // getUser() re-verifies the session against Supabase Auth rather than
+  // trusting locally-stored session data, per Supabase's own guidance for
+  // server-side authorization decisions.
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     redirect("/auth/login");
   }
 
@@ -20,7 +23,7 @@ export default async function UsersAdminPage() {
   const { data: me, error: meError } = await supabase
     .from("profiles")
     .select("id, full_name, role")
-    .eq("id", session.user.id)
+    .eq("id", user.id)
     .single();
 
   if (meError || !me) {
@@ -34,7 +37,7 @@ export default async function UsersAdminPage() {
   // Load all OTHER users (no email column here either)
   const { data: users, error: usersError } = await supabase
     .from("profiles")
-    .select("id, full_name, role, manager_id")
+    .select("id, full_name, role, manager_id, account_status, access_expires_at, requested_role")
     .neq("id", me.id)
     .order("full_name", { ascending: true });
 
@@ -76,7 +79,7 @@ export default async function UsersAdminPage() {
   // no email on record.
   const adminEmail = emailsById.has(me.id)
     ? emailsById.get(me.id) ?? null
-    : session.user.email ?? null;
+    : user.email ?? null;
 
   return (
     <UsersAdminClient

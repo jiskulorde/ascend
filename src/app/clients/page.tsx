@@ -1,8 +1,7 @@
 // src/app/clients/page.tsx
 
 import { redirect } from "next/navigation";
-import { serverSupabase } from "@/lib/supabase/server";
-import { SELLER_ROLES, type Role } from "@/lib/auth/role";
+import { requireActivePage, SELLER_ROLES } from "@/lib/auth/role";
 import ClientPropertiesClient from "@/components/clients/ClientPropertiesClient";
 
 export const dynamic = "force-dynamic";
@@ -14,26 +13,14 @@ export const dynamic = "force-dynamic";
 // from primary navigation and isn't being redesigned here — just brought in
 // line with the same role rule as every other full-inventory page, so a
 // CLIENT never lands on a broken empty page after that API returns 403.
+//
+// Not under middleware.ts's matched prefixes — lifecycle enforcement
+// happens here directly, via requireActivePageAccount() (fail-closed on a
+// missing/unreadable profile), not getCurrentUser().
 export default async function ClientsPage() {
-  const supabase = await serverSupabase();
+  const currentUser = await requireActivePage("/clients");
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/auth/login?next=/clients");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const role = (profile?.role || "CLIENT") as Role;
-
-  if (!SELLER_ROLES.includes(role)) {
+  if (!SELLER_ROLES.includes(currentUser.role)) {
     redirect("/");
   }
 

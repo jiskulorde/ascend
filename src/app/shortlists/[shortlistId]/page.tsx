@@ -1,8 +1,7 @@
 // src/app/shortlists/[shortlistId]/page.tsx
 
 import { redirect } from "next/navigation";
-import { serverSupabase } from "@/lib/supabase/server";
-import { SELLER_ROLES, type Role } from "@/lib/auth/role";
+import { requireActivePage, SELLER_ROLES } from "@/lib/auth/role";
 import ShortlistDetailClient from "@/components/shortlists/ShortlistDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -11,31 +10,21 @@ export const dynamic = "force-dynamic";
 // independently by requireSellerSession() on every /api/shortlists route and
 // by RLS in the client_shortlists migration — neither was weakened here.
 // CLIENT now gets sent Home instead of /403, matching shortlists/page.tsx.
+//
+// Not under middleware.ts's matched prefixes — see the note in
+// shortlists/page.tsx for why lifecycle enforcement happens here directly,
+// via requireActivePageAccount() (fail-closed on a missing/unreadable
+// profile), not getCurrentUser().
 export default async function ShortlistDetailPage({
   params,
 }: {
   params: Promise<{ shortlistId: string }>;
 }) {
   const { shortlistId } = await params;
-  const supabase = await serverSupabase();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const currentUser = await requireActivePage(`/shortlists/${shortlistId}`);
 
-  if (!user) {
-    redirect(`/auth/login?next=/shortlists/${shortlistId}`);
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const role = (profile?.role || "CLIENT") as Role;
-
-  if (!SELLER_ROLES.includes(role)) {
+  if (!SELLER_ROLES.includes(currentUser.role)) {
     redirect("/");
   }
 

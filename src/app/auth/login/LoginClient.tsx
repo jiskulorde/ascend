@@ -7,6 +7,14 @@ import { useSearchParams } from "next/navigation";
 import { browserSupabase } from "@/lib/supabase/client";
 import { parseExplicitNext, resolvePostLoginDestination } from "@/lib/auth/postLoginDestination";
 
+type RequestedRole = "CLIENT" | "AGENT" | "MANAGER";
+
+const ACCOUNT_TYPE_OPTIONS: { value: RequestedRole; label: string }[] = [
+  { value: "CLIENT", label: "Buyer / Client" },
+  { value: "AGENT", label: "Property Consultant / Agent" },
+  { value: "MANAGER", label: "Manager" },
+];
+
 export default function LoginClient() {
   const search = useSearchParams();
   const explicitNext = useMemo(() => parseExplicitNext(search.get("next")), [search]);
@@ -20,6 +28,7 @@ export default function LoginClient() {
   const [pass, setPass] = useState("");
 
   const [fullName, setFullName] = useState("");
+  const [requestedRole, setRequestedRole] = useState<RequestedRole>("CLIENT");
 
   async function goToDestination(destination: string) {
     // Give Supabase a tiny moment to persist cookies, then force a real navigation.
@@ -53,15 +62,20 @@ export default function LoginClient() {
         return;
       }
 
+      // Picked up by the public.handle_new_user() trigger on auth.users,
+      // which is what actually creates the profiles row (id, full_name,
+      // requested_role — sanitized independently by the trigger itself,
+      // never trusted as-is). Nothing here is browser-writable on profiles
+      // directly. The account is created PENDING regardless of
+      // requested_role — this only records what was asked for, for an
+      // Admin to review; it never becomes the authoritative role by itself.
+      const metadata: Record<string, string> = { requested_role: requestedRole };
+      if (fullName.trim()) metadata.full_name = fullName.trim();
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password: pass,
-        options: {
-          // Picked up by the public.handle_new_user() trigger on auth.users,
-          // which is what actually creates the profiles row (id, full_name).
-          // Nothing here is browser-writable on profiles itself anymore.
-          data: fullName.trim() ? { full_name: fullName.trim() } : undefined,
-        },
+        options: { data: metadata },
       });
 
       if (error) throw error;
@@ -72,7 +86,9 @@ export default function LoginClient() {
         return;
       }
 
-      setErr("Check your email to confirm your account. You can sign in after verifying.");
+      setErr(
+        "Check your email to verify your account. Once verified, sign in — your account will remain pending until an administrator approves it."
+      );
     } catch (e: any) {
       setErr(e.message ?? "Something went wrong");
       setBusy(false);
@@ -155,6 +171,30 @@ export default function LoginClient() {
                   autoComplete="name"
                 />
               </div>
+
+              <div>
+                <label className="text-sm text-muted-foreground">I am a</label>
+                <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {ACCOUNT_TYPE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setRequestedRole(opt.value)}
+                      aria-pressed={requestedRole === opt.value}
+                      className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                        requestedRole === opt.value
+                          ? "border-[color:var(--primary)] bg-[color:var(--primary)]/5 font-medium text-foreground"
+                          : "border-input text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  New accounts require administrator approval before sign-in.
+                </p>
+              </div>
             </div>
           )}
 
@@ -227,7 +267,7 @@ export default function LoginClient() {
       </div>
 
       <p className="mt-3 text-center text-[11px] text-muted-foreground">
-        We keep sign-up simple: email and password. New users get a Client account by default.
+        We keep sign-up simple: email, password, and your requested account type.
       </p>
     </div>
   );

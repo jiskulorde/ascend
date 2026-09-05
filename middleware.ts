@@ -2,6 +2,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { computeEffectiveState, type AccountStatus } from "@/lib/auth/accountLifecycle";
 
 type Role = "CLIENT" | "AGENT" | "MANAGER" | "ADMIN";
 
@@ -103,13 +104,37 @@ export async function middleware(req: NextRequest) {
     return redirectToLogin(req);
   }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, account_status, access_expires_at")
     .eq("id", user.id)
     .maybeSingle();
 
-  const role = (profile?.role || "CLIENT") as Role;
+  // Fail closed: a missing or unreadable profile is NEVER treated as
+  // CLIENT/ACTIVE. This is the primary enforcement layer for every prefix
+  // below (agent, manager, dashboard/*, summary, compare, computation) —
+  // /account/status is not itself under any guarded prefix, so this can't
+  // loop.
+  if (profileError || !profile) {
+    return redirectToDenied(req, "/account/status");
+  }
+
+  const role = profile.role as Role;
+  const accountStatus = profile.account_status as AccountStatus;
+  const accessExpiresAt = (profile.access_expires_at as string | null) ?? null;
+  const effectiveState = computeEffectiveState(accountStatus, accessExpiresAt);
+
+  // Lifecycle before role (Phase 3B): a PENDING/SUSPENDED/DEACTIVATED/
+  // EXPIRED account is redirected regardless of what role currently says —
+  // role only answers what an account can do when it may act at all, not
+  // whether it may act right now. /account/pending is likewise not under
+  // any guarded prefix, so this can't loop either.
+  if (effectiveState === "PENDING") {
+    return redirectToDenied(req, "/account/pending");
+  }
+  if (effectiveState !== "ACTIVE") {
+    return redirectToDenied(req, "/account/status");
+  }
 
   if (!guard.allow.includes(role)) {
     return redirectToDenied(req, guard.deniedRedirect ?? "/403");
